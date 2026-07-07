@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mtl Food</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@3/dist/maplibre-gl.css" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="app">
+    <!-- ── Left sidebar ───────────────────────────────── -->
+    <aside id="sidebar">
+      <header id="brand">
+        <span class="brand-mark">▲</span>
+        <span class="brand-name">mtl<strong>food</strong></span>
+      </header>
+
+      <!-- Pin status -->
+      <div id="pin-status" class="status-pill status-idle">
+        Click the map to drop a pin
+      </div>
+
+      <!-- Controls -->
+      <section class="control-group">
+        <label class="control-label">Mode</label>
+        <div class="toggle-row">
+          <button id="btn-walk" class="toggle-btn active" data-mode="walk">Walk</button>
+          <button id="btn-bike" class="toggle-btn" data-mode="bike">Bike</button>
+        </div>
+      </section>
+
+      <section class="control-group">
+        <label class="control-label">
+          Travel time <span id="cutoff-display" class="value-badge">20 min</span>
+        </label>
+        <input id="slider-cutoff" type="range" min="5" max="60" value="20" step="5" class="slider" />
+      </section>
+
+      <section class="control-group">
+        <label class="control-label">Price</label>
+        <div class="price-row">
+          <button class="price-btn active" data-price="1">$</button>
+          <button class="price-btn active" data-price="2">$$</button>
+          <button class="price-btn active" data-price="3">$$$</button>
+          <button class="price-btn active" data-price="4">$$$$</button>
+          <button class="price-btn active" data-price="0">?</button>
+        </div>
+      </section>
+
+      <section class="control-group">
+        <label class="control-label">
+          Quality
+          <span id="weight-display" class="value-badge">0.6</span>
+          vs Closeness
+        </label>
+        <input id="slider-weight" type="range" min="0" max="1" value="0.6" step="0.05" class="slider" />
+      </section>
+
+      <!-- View tabs -->
+      <div class="tab-row">
+        <button id="tab-best" class="tab-btn active">Best near you</button>
+        <button id="tab-gems" class="tab-btn">Hidden gems</button>
+      </div>
+
+      <!-- Results list -->
+      <div id="results-list">
+        <div class="results-empty">Drop a pin to discover restaurants</div>
+      </div>
+
+      <footer id="sidebar-footer">
+        <button id="btn-locate">⊕ Use my location</button>
+      </footer>
+    </aside>
+
+    <!-- ── Map container ──────────────────────────────── -->
+    <div id="map-wrap">
+      <div id="map"></div>
+      <canvas id="deck-canvas"></canvas>
+      <!-- loading overlay removed; data-loading state lives in #pin-status -->
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/maplibre-gl@3/dist/maplibre-gl.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/deck.gl@8.9/dist.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
