@@ -47,7 +47,7 @@ RADIUS_M = 1200
 DELAY_S = 2.1   # API requires >2 s between page_token requests
 
 
-def fetch_nearby(lat: float, lon: float, place_type: str) -> list[dict]:
+def fetch_nearby(lat: float, lon: float, place_type: str) -> "list[dict]":
     params = {
         "key": API_KEY,
         "location": f"{lat},{lon}",
@@ -74,7 +74,7 @@ def fetch_nearby(lat: float, lon: float, place_type: str) -> list[dict]:
     return results
 
 
-def extract(raw: dict) -> dict | None:
+def extract(raw: dict) -> "dict | None":
     place_id = raw.get("place_id")
     if not place_id:
         return None
@@ -107,7 +107,7 @@ def extract(raw: dict) -> dict | None:
 
 
 def main():
-    seen: dict[str, dict] = {}
+    seen = {}  # type: dict[str, dict]
     total_requests = 0
 
     for i, (lat, lon) in enumerate(SEARCH_CENTERS):

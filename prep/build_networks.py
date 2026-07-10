@@ -20,6 +20,9 @@ from pathlib import Path
 import networkx as nx
 import osmnx as ox
 
+# Allow large single queries and longer timeouts to avoid sub-query storms
+ox.settings.timeout = 300
+
 # Central Montreal bounding box  (north, south, east, west)
 # Covers: Plateau, Mile End, Downtown, Old Mtl, Rosemont, Villeray,
 #         NDG, Côte-des-Neiges, Verdun, Hochelaga
@@ -90,8 +93,9 @@ def download_and_export(network_type: str, speed_mps: float, out_path: Path) -> 
     """Download graph, export JSON, return nodes list for place-snapping."""
     print(f"\n=== {network_type.upper()} NETWORK ===")
     print("Downloading from OSM …")
+    # osmnx 2.x bbox order: (west, south, east, north)
     G = ox.graph_from_bbox(
-        bbox=(NORTH, SOUTH, EAST, WEST),
+        bbox=(WEST, SOUTH, EAST, NORTH),
         network_type=network_type,
         simplify=True,
         retain_all=False,
