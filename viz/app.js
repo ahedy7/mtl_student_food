@@ -4,18 +4,32 @@
    ───────────────────────────────────────────────────────────────────────── */
 
 const INITIAL_VIEW = { longitude: -73.5752, latitude: 45.5088, zoom: 13, pitch: 0, bearing: 0 };
-const MAP_STYLE    = "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json";
 const PRICE_LABELS = { 0: "?", 1: "$", 2: "$$", 3: "$$$", 4: "$$$$" };
+
+const BASEMAPS = {
+  "dark-matter":      "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json",
+  "positron":         "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json",
+  "voyager":          "https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json",
+  "ofm-liberty":      "https://tiles.openfreemap.org/styles/liberty",
+  "ofm-positron":     "https://tiles.openfreemap.org/styles/positron",
+  "stadia-smooth-dark": "https://tiles.stadiamaps.com/styles/alidade_smooth_dark.json",
+  "stadia-smooth":    "https://tiles.stadiamaps.com/styles/alidade_smooth.json",
+  "stadia-toner":     "https://tiles.stadiamaps.com/styles/stamen_toner.json",
+  "stadia-toner-lite":"https://tiles.stadiamaps.com/styles/stamen_toner_lite.json",
+};
 
 /* ── State ───────────────────────────────────────────────────────────────── */
 const state = {
-  mode:    "walk",
-  cutoff:  20,        // minutes
-  prices:  new Set([0, 1, 2, 3, 4]),
-  w:       0.6,       // quality weight (0 = all closeness, 1 = all quality)
-  view:    "best",    // "best" | "gems"
-  pin:     null,      // { lat, lon }
-  hover:   null,      // place id currently hovered
+  mode:     "walk",
+  cutoff:   20,        // minutes
+  prices:   new Set(),   // empty = show all prices
+  w:        0.6,       // quality weight (0 = all closeness, 1 = all quality)
+  view:     "best",    // "best" | "gems"
+  category: null,      // null = all, or a Google type key string
+  pin:      null,      // { lat, lon }
+  hover:    null,
+  selected: null,
+  search:   "",
 };
 
 /* ── Data ────────────────────────────────────────────────────────────────── */
@@ -120,13 +134,17 @@ function filterAndScore(distArr, cutoffSec) {
   const C = meanRating;
   const nodeKey = state.mode === "walk" ? "walk_node" : "bike_node";
 
-  // Hard filters: reachability + price
+  // Hard filters: reachability + price + category
   let survivors = places.filter(p => {
     const t = distArr[p[nodeKey]];
-    return t !== undefined && t <= cutoffSec && state.prices.has(p.price ?? 0);
+    if (t === undefined || t > cutoffSec) return false;
+    if (state.prices.size > 0 && !state.prices.has(p.price ?? 0)) return false;
+    if (state.category && !(p.types || []).includes(state.category)) return false;
+    return true;
   }).map(p => ({
     ...p,
     travelMin: distArr[p[nodeKey]] / 60,
+    distM:     distArr[p[nodeKey]] * (state.mode === "walk" ? 4800 / 3600 : 15000 / 3600),
   }));
 
   if (!survivors.length) return [];
@@ -191,8 +209,8 @@ function renderLayers(scored) {
     id: "restaurants",
     data: viewPlaces,
     getPosition: d => [d.lon, d.lat],
-    getRadius: d => 5 + d.score * 9,
-    getFillColor: d => state.view === "gems" ? gemColor() : scoreToColor(d.score),
+    getRadius: d => state.selected === d.id ? (5 + d.score * 9) * 1.25 : 5 + d.score * 9,
+    getFillColor: d => state.selected === d.id ? [255, 200, 0, 255] : state.view === "gems" ? gemColor() : scoreToColor(d.score),
     getLineColor: d => state.hover === d.id ? [255, 255, 255, 200] : [255, 255, 255, 40],
     lineWidthMinPixels: 1,
     stroked: true,
@@ -200,10 +218,13 @@ function renderLayers(scored) {
     pickable: true,
     autoHighlight: false,
     updateTriggers: {
-      getFillColor: [state.view, state.hover],
+      getFillColor: [state.view, state.hover, state.selected],
       getLineColor: [state.hover],
+      getRadius: [state.selected],
     },
   });
+
+  const selectedRing = new ScatterplotLayer({ id: "selected-ring", data: [] });
 
   const pinData = state.pin ? [state.pin] : [];
   const pinOuter = new ScatterplotLayer({
@@ -228,7 +249,7 @@ function renderLayers(scored) {
     pickable: false,
   });
 
-  deckgl.setProps({ layers: [restaurants, pinOuter, pinInner] });
+  deckgl.setProps({ layers: [restaurants, selectedRing, pinOuter, pinInner] });
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -237,6 +258,24 @@ function renderLayers(scored) {
 
 function priceStr(price) { return PRICE_LABELS[price] ?? "?"; }
 function modeIcon()      { return state.mode === "walk" ? "🚶" : "🚴"; }
+
+const TYPE_LABELS = {
+  cafe:                    "Café",
+  bakery:                  "Bakery",
+  bar:                     "Bar",
+  meal_takeaway:           "Takeout",
+  grocery_or_supermarket:  "Grocery",
+  liquor_store:            "Liquor",
+  night_club:              "Nightclub",
+  convenience_store:       "Convenience",
+  supermarket:             "Supermarket",
+};
+function typeLabel(types = []) {
+  for (const t of types) {
+    if (TYPE_LABELS[t]) return TYPE_LABELS[t];
+  }
+  return null;
+}
 
 function renderList(scored) {
   const list  = document.getElementById("results-list");
@@ -247,25 +286,46 @@ function renderList(scored) {
     return;
   }
 
-  list.innerHTML = items.slice(0, 60).map((p, i) => {
-    const isTop  = i < 3 && state.view === "best";
-    const isGem  = state.view === "gems";
-    const pct    = Math.round(p.score * 100);
-    const tMin   = p.travelMin.toFixed(0);
-    const pLabel = priceStr(p.price);
+  const q = state.search.trim().toLowerCase();
+  const filtered = q ? items.filter(p => {
+    const tLabel = typeLabel(p.types) || "";
+    return p.name.toLowerCase().includes(q) || tLabel.toLowerCase().includes(q);
+  }) : items;
+
+  if (!filtered.length) {
+    list.innerHTML = `<div class="results-empty">No results match "${escHtml(state.search)}"</div>`;
+    return;
+  }
+
+  const mapsUrl = id => `https://www.google.com/maps/place/?q=place_id:${id}`;
+
+  list.innerHTML = filtered.slice(0, 60).map((p, i) => {
+    const isTop   = i < 3 && state.view === "best" && !q;
+    const isGem   = state.view === "gems";
+    const pct     = Math.round(p.score * 100);
+    const tMin    = p.travelMin.toFixed(0);
+    const pLabel  = priceStr(p.price);
+    const tLabel  = typeLabel(p.types);
+    const rPct    = Math.round((p.ratingScaled ?? 0) * 100);
+    const cPct    = Math.round((p.closeness ?? 0) * 100);
 
     return `<div class="result-item" data-id="${p.id}" tabindex="0">
       <div class="result-rank ${isTop ? "top" : ""}">${isGem ? "◆" : i + 1}</div>
       <div class="result-body">
-        <div class="result-name">${escHtml(p.name)}</div>
+        <div class="result-name-row">
+          <span class="result-name">${escHtml(p.name)}</span>
+          <a class="maps-link" href="${mapsUrl(p.id)}" target="_blank" rel="noopener" title="Open in Google Maps" onclick="event.stopPropagation()">↗</a>
+        </div>
         <div class="result-meta">
           <span class="result-rating">★ ${p.rating.toFixed(1)}<span class="result-rating-count">(${fmtNum(p.reviews)})</span></span>
           ${pLabel !== "?" ? `<span class="result-price">${pLabel}</span>` : ""}
-          <span class="result-time">${modeIcon()} ${tMin} min</span>
+          ${tLabel ? `<span class="type-badge">${tLabel}</span>` : ""}
+          <span class="result-time">${modeIcon()} ${tMin} min · ${fmtDist(p.distM)}</span>
           ${isGem ? `<span class="gem-badge">few reviews</span>` : ""}
         </div>
-        ${state.view === "best"
-          ? `<div class="result-score-bar"><div class="result-score-fill" style="width:${pct}%"></div></div>`
+        ${state.view === "best" && !isGem
+          ? `<div class="result-score-bar"><div class="result-score-fill" style="width:${pct}%"></div></div>
+             <div class="score-breakdown">★ ${rPct}%&ensp;·&ensp;📍 ${cPct}%</div>`
           : ""}
       </div>
     </div>`;
@@ -283,7 +343,16 @@ function renderList(scored) {
     });
     el.addEventListener("click", () => {
       const place = items.find(p => p.id === el.dataset.id);
-      if (place) flyTo(place.lon, place.lat);
+      if (!place) return;
+      state.selected = el.dataset.id;
+      state.hover = el.dataset.id;
+      renderLayers(lastScored);
+      if (maplib) {
+        const bounds = maplib.getBounds();
+        if (!bounds.contains([place.lon, place.lat])) {
+          flyTo(place.lon, place.lat);
+        }
+      }
     });
   });
 }
@@ -294,6 +363,10 @@ function escHtml(s) {
 function fmtNum(n) {
   if (n >= 1000) return (n / 1000).toFixed(1) + "k";
   return String(n);
+}
+function fmtDist(m) {
+  if (m >= 1000) return (m / 1000).toFixed(1) + " km";
+  return Math.round(m) + " m";
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -386,6 +459,10 @@ async function loadData() {
 function handleMapClick({ coordinate }) {
   if (!coordinate) return;
   state.pin = { lon: coordinate[0], lat: coordinate[1] };
+  state.selected = null;
+  state.search = "";
+  const sb = document.getElementById("search-bar");
+  if (sb) sb.value = "";
   render();
 }
 
@@ -397,7 +474,7 @@ function initMap() {
   // MapLibre base map (non-interactive; deck.gl drives pan/zoom)
   maplib = new maplibregl.Map({
     container: "map",
-    style: MAP_STYLE,
+    style: BASEMAPS["ofm-liberty"],
     center: [INITIAL_VIEW.longitude, INITIAL_VIEW.latitude],
     zoom: INITIAL_VIEW.zoom,
     interactive: false,
@@ -425,13 +502,17 @@ function initMap() {
       if (!object) return null;
       const p      = object;
       const pLabel = priceStr(p.price);
+      const tLabel = typeLabel(p.types);
       const tMin   = p.travelMin != null ? `${p.travelMin.toFixed(0)} min` : "";
+      const dist   = p.distM != null ? fmtDist(p.distM) : "";
       return {
         html: `
-          <strong>${escHtml(p.name)}</strong><br/>
-          ★ ${p.rating.toFixed(1)} &nbsp;·&nbsp; ${fmtNum(p.reviews)} reviews
-          ${pLabel !== "?" ? `&nbsp;·&nbsp; ${pLabel}` : ""}
-          ${tMin ? `<br/><small>${modeIcon()} ${tMin}</small>` : ""}`,
+          <strong>${escHtml(p.name)}</strong>
+          ${tLabel ? `<span class="tt-type">${tLabel}</span>` : ""}<br/>
+          <span class="tt-stars">★ ${p.rating.toFixed(1)}</span>
+          <span class="tt-muted">(${fmtNum(p.reviews)} reviews)</span>
+          ${pLabel !== "?" ? `&nbsp;·&nbsp;<span class="tt-price">${pLabel}</span>` : ""}
+          ${tMin ? `<br/><span class="tt-muted">${modeIcon()} ${tMin}${dist ? " · " + dist : ""}</span>` : ""}`,
         className: "deck-tooltip",
         style: {},
       };
@@ -463,22 +544,36 @@ function initControls() {
   // Weight slider
   const weightSlider = document.getElementById("slider-weight");
   const weightDisplay = document.getElementById("weight-display");
+  const updateWeightLabel = () => {
+    const pct = Math.round(state.w * 100);
+    weightDisplay.textContent = pct === 50 ? "balanced"
+      : pct > 50 ? `${pct}% rating`
+      : `${100 - pct}% proximity`;
+  };
+  updateWeightLabel();
   weightSlider.addEventListener("input", () => {
     state.w = +weightSlider.value;
-    weightDisplay.textContent = state.w.toFixed(2);
+    updateWeightLabel();
     render();
   });
 
-  // Price buttons
+  // Category chips
+  document.querySelectorAll(".cat-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      state.category = btn.dataset.cat || null;
+      document.querySelectorAll(".cat-btn").forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      render();
+    });
+  });
+
+  // Price buttons — click to include, click again to remove; empty = all
   document.querySelectorAll(".price-btn").forEach(btn => {
     btn.addEventListener("click", () => {
       const p = +btn.dataset.price;
       if (state.prices.has(p)) {
-        // Always keep at least one price selected
-        if (state.prices.size > 1) {
-          state.prices.delete(p);
-          btn.classList.remove("active");
-        }
+        state.prices.delete(p);
+        btn.classList.remove("active");
       } else {
         state.prices.add(p);
         btn.classList.add("active");
@@ -500,6 +595,25 @@ function initControls() {
     document.getElementById("tab-best").classList.remove("active");
     render();
   });
+
+  // Search bar
+  document.getElementById("search-bar").addEventListener("input", e => {
+    state.search = e.target.value;
+    renderList(lastScored);
+  });
+
+  // Basemap switcher
+  document.getElementById("basemap-select").addEventListener("change", e => {
+    const url = BASEMAPS[e.target.value];
+    if (url && maplib) maplib.setStyle(url);
+  });
+
+  // Welcome modal
+  const overlay = document.getElementById("welcome-overlay");
+  const closeModal = () => overlay.classList.add("hidden");
+  document.getElementById("welcome-close").addEventListener("click", closeModal);
+  overlay.addEventListener("click", e => { if (e.target === overlay) closeModal(); });
+  document.getElementById("btn-help").addEventListener("click", () => overlay.classList.remove("hidden"));
 
   // Geolocation
   document.getElementById("btn-locate").addEventListener("click", () => {

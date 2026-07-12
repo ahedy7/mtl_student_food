@@ -40,27 +40,45 @@
       <section class="control-group">
         <label class="control-label">Price</label>
         <div class="price-row">
-          <button class="price-btn active" data-price="1">$</button>
-          <button class="price-btn active" data-price="2">$$</button>
-          <button class="price-btn active" data-price="3">$$$</button>
-          <button class="price-btn active" data-price="4">$$$$</button>
-          <button class="price-btn active" data-price="0">?</button>
+          <button class="price-btn" data-price="1">$</button>
+          <button class="price-btn" data-price="2">$$</button>
+          <button class="price-btn" data-price="3">$$$</button>
+          <button class="price-btn" data-price="4">$$$$</button>
+          <button class="price-btn" data-price="0">?</button>
         </div>
       </section>
 
       <section class="control-group">
         <label class="control-label">
-          Quality
+          Proximity ←→ Rating
           <span id="weight-display" class="value-badge">0.6</span>
-          vs Closeness
         </label>
         <input id="slider-weight" type="range" min="0" max="1" value="0.6" step="0.05" class="slider" />
+        <div class="slider-ends"><span>Closer</span><span>Higher-rated</span></div>
+      </section>
+
+      <section class="control-group">
+        <label class="control-label">Category</label>
+        <div class="category-row">
+          <button class="cat-btn active" data-cat="">All</button>
+          <button class="cat-btn" data-cat="restaurant">Restaurant</button>
+          <button class="cat-btn" data-cat="cafe">Café</button>
+          <button class="cat-btn" data-cat="bar">Bar</button>
+          <button class="cat-btn" data-cat="bakery">Bakery</button>
+          <button class="cat-btn" data-cat="meal_takeaway">Takeout</button>
+          <button class="cat-btn" data-cat="grocery_or_supermarket">Grocery</button>
+        </div>
       </section>
 
       <!-- View tabs -->
       <div class="tab-row">
         <button id="tab-best" class="tab-btn active">Best near you</button>
         <button id="tab-gems" class="tab-btn">Hidden gems</button>
+      </div>
+
+      <!-- Search -->
+      <div id="search-wrap">
+        <input id="search-bar" type="text" placeholder="Search places…" autocomplete="off" />
       </div>
 
       <!-- Results list -->
@@ -70,8 +88,68 @@
 
       <footer id="sidebar-footer">
         <button id="btn-locate">⊕ Use my location</button>
+        <select id="basemap-select" title="Change basemap">
+          <option value="ofm-liberty" selected>OFM Liberty</option>
+          <option value="dark-matter">Dark Matter</option>
+          <option value="positron">Positron (light)</option>
+          <option value="voyager">Voyager</option>
+          <option value="ofm-positron">OFM Positron (light)</option>
+          <option value="stadia-smooth-dark">Stadia Smooth Dark</option>
+          <option value="stadia-smooth">Stadia Smooth (light)</option>
+          <option value="stadia-toner">Stadia Toner (B&W)</option>
+          <option value="stadia-toner-lite">Stadia Toner Lite</option>
+        </select>
+        <button id="btn-help" title="How it works">?</button>
       </footer>
     </aside>
+
+    <!-- ── Welcome modal ────────────────────────────────── -->
+    <div id="welcome-overlay">
+      <div id="welcome-modal">
+        <h2>Welcome to <span class="brand-accent">mtl</span><strong>food</strong></h2>
+        <p class="welcome-sub">Discover the best food near you in Montreal, routed along real streets.</p>
+
+        <div class="welcome-section">
+          <div class="welcome-row">
+            <div class="dot-demo">
+              <span class="demo-dot dim"></span>
+              <span class="demo-dot mid"></span>
+              <span class="demo-dot bright large"></span>
+            </div>
+            <div>
+              <strong>What do the dots mean?</strong><br/>
+              <span class="welcome-muted">Size and brightness = how well a place matches your settings. Bigger and brighter teal = higher score. Smaller and dimmer = lower score.</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="welcome-section">
+          <div class="welcome-row">
+            <div class="slider-demo">
+              <span class="sd-left">📍</span>
+              <div class="sd-track"><div class="sd-thumb"></div></div>
+              <span class="sd-right">★</span>
+            </div>
+            <div>
+              <strong>Proximity ←→ Rating slider</strong><br/>
+              <span class="welcome-muted">Drag left to prioritize places <em>closest</em> to you. Drag right to prioritize <em>highest-rated</em> places regardless of distance.</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="welcome-section">
+          <div class="welcome-row">
+            <span class="price-demo">?</span>
+            <div>
+              <strong>The <code>?</code> price category</strong><br/>
+              <span class="welcome-muted">About 37% of places don't have price data on Google Maps. <code>?</code> includes all of them — there are some great spots hiding here.</span>
+            </div>
+          </div>
+        </div>
+
+        <button id="welcome-close">Got it — show me the map</button>
+      </div>
+    </div>
 
     <!-- ── Map container ──────────────────────────────── -->
     <div id="map-wrap">
