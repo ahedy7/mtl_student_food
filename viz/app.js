@@ -26,6 +26,7 @@ const state = {
   w:        0.6,       // quality weight (0 = all closeness, 1 = all quality)
   view:     "best",    // "best" | "gems"
   category: null,      // null = all, or a Google type key string
+  openNow:  false,     // filter to currently-open places only
   pin:      null,      // { lat, lon }
   hover:    null,
   selected: null,
@@ -140,6 +141,7 @@ function filterAndScore(distArr, cutoffSec) {
     if (t === undefined || t > cutoffSec) return false;
     if (state.prices.size > 0 && !state.prices.has(p.price ?? 0)) return false;
     if (state.category && !(p.types || []).includes(state.category)) return false;
+    if (state.openNow && isOpenNow(p.hours) !== true) return false;
     return true;
   }).map(p => ({
     ...p,
@@ -256,6 +258,25 @@ function renderLayers(scored) {
    RESULTS LIST
    ══════════════════════════════════════════════════════════════════════════ */
 
+/* Returns true (open), false (closed), or null (unknown hours). */
+function isOpenNow(hours) {
+  if (!hours || !hours.length) return null;
+  const now  = new Date();
+  const day  = now.getDay();
+  const time = now.getHours() * 100 + now.getMinutes();
+  for (const [od, ot, cd, ct] of hours) {
+    if (cd === -1) return true;        // 24/7
+    if (od === cd) {
+      if (day === od && time >= ot && time < ct) return true;
+    } else {
+      // spans midnight
+      if (day === od && time >= ot) return true;
+      if (day === cd && time < ct)  return true;
+    }
+  }
+  return false;
+}
+
 function priceStr(price) { return PRICE_LABELS[price] ?? "?"; }
 function modeIcon()      { return state.mode === "walk" ? "🚶" : "🚴"; }
 
@@ -308,12 +329,17 @@ function renderList(scored) {
     const tLabel  = typeLabel(p.types);
     const rPct    = Math.round((p.ratingScaled ?? 0) * 100);
     const cPct    = Math.round((p.closeness ?? 0) * 100);
+    const openStatus = isOpenNow(p.hours);
+    const openBadge  = openStatus === true  ? `<span class="open-badge open">Open</span>`
+                     : openStatus === false ? `<span class="open-badge closed">Closed</span>`
+                     : "";
 
     return `<div class="result-item" data-id="${p.id}" tabindex="0">
       <div class="result-rank ${isTop ? "top" : ""}">${isGem ? "◆" : i + 1}</div>
       <div class="result-body">
         <div class="result-name-row">
           <span class="result-name">${escHtml(p.name)}</span>
+          ${openBadge}
           <a class="maps-link" href="${mapsUrl(p.id)}" target="_blank" rel="noopener" title="Open in Google Maps" onclick="event.stopPropagation()">↗</a>
         </div>
         <div class="result-meta">
@@ -593,6 +619,14 @@ function initControls() {
     state.view = "gems";
     document.getElementById("tab-gems").classList.add("active");
     document.getElementById("tab-best").classList.remove("active");
+    render();
+  });
+
+  // Open now toggle
+  const btnOpenNow = document.getElementById("btn-open-now");
+  btnOpenNow.addEventListener("click", () => {
+    state.openNow = !state.openNow;
+    btnOpenNow.classList.toggle("active", state.openNow);
     render();
   });
 
