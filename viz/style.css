@@ -315,6 +315,19 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
 .open-badge.open   { background: #0a2a18; border: 1px solid #006040; color: #00c070; }
 .open-badge.closed { background: #2a0a0a; border: 1px solid #600020; color: #ff4060; }
 
+.heat-badge {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 4px;
+  letter-spacing: 0.04em;
+  background: #1a0e00;
+  border: 1px solid #5a3000;
+  color: #ff8c20;
+  white-space: nowrap;
+}
+
 /* ── Results list ────────────────────────────────────────────────────────── */
 #results-list {
   flex: 1;

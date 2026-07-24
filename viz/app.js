@@ -18,6 +18,11 @@ const BASEMAPS = {
   "stadia-toner-lite":"https://tiles.stadiamaps.com/styles/stamen_toner_lite.json",
 };
 
+/* ── Heating-up thresholds (tweak as needed) ────────────────────────────── */
+const HEAT_MIN_SHARE   = 0.5;   // >= half the review sample from last 6 months
+const HEAT_MAX_REVIEWS = 300;   // still gaining traction (not yet mobbed)
+const HEAT_MIN_REVIEWS = 15;    // need enough sample to trust the ratio
+
 /* ── State ───────────────────────────────────────────────────────────────── */
 const state = {
   mode:     "walk",
@@ -39,6 +44,8 @@ let meanRating  = 0;
 let graphs      = { walk: null, bike: null };
 let adjLists    = { walk: null, bike: null };
 let lastScored  = [];
+let lastDistArr = null;
+let lastGraph   = null;
 
 /* ── deck.gl + MapLibre ──────────────────────────────────────────────────── */
 let deckgl = null;
@@ -125,6 +132,42 @@ function dijkstra(adj, start, cutoffSec) {
   return dist;
 }
 
+/* Andrew's monotone chain — returns convex hull of [[x,y],...] in CCW order. */
+function convexHull(pts) {
+  if (pts.length < 3) return pts;
+  const s = [...pts].sort((a, b) => a[0] !== b[0] ? a[0] - b[0] : a[1] - b[1]);
+  const cross = (o, a, b) => (a[0]-o[0])*(b[1]-o[1]) - (a[1]-o[1])*(b[0]-o[0]);
+  const lower = [];
+  for (const p of s) {
+    while (lower.length >= 2 && cross(lower[lower.length-2], lower[lower.length-1], p) <= 0) lower.pop();
+    lower.push(p);
+  }
+  const upper = [];
+  for (let i = s.length - 1; i >= 0; i--) {
+    const p = s[i];
+    while (upper.length >= 2 && cross(upper[upper.length-2], upper[upper.length-1], p) <= 0) upper.pop();
+    upper.push(p);
+  }
+  lower.pop();
+  upper.pop();
+  return lower.concat(upper);
+}
+
+/* Returns [lon,lat] convex hull of all reachable graph nodes, or null. */
+function isochronePolygon() {
+  if (!lastGraph || !lastDistArr) return null;
+  const nodes = lastGraph.nodes;
+  const cutoffSec = state.cutoff * 60;
+  const pts = [];
+  for (let i = 0; i < nodes.length; i++) {
+    if (lastDistArr[i] <= cutoffSec) {
+      pts.push([nodes[i][1], nodes[i][0]]); // graph stores [lat,lon]; deck.gl wants [lon,lat]
+    }
+  }
+  if (pts.length < 3) return null;
+  return convexHull(pts);
+}
+
 /* ══════════════════════════════════════════════════════════════════════════
    SCORING
    ══════════════════════════════════════════════════════════════════════════ */
@@ -203,7 +246,22 @@ function scoreToColor(score) {
 function gemColor() { return [255, 209, 102, 230]; }
 
 function renderLayers(scored) {
-  const { ScatterplotLayer } = deck;
+  const { ScatterplotLayer, PolygonLayer } = deck;
+
+  // Isochrone: convex hull of reachable nodes, drawn under restaurant dots
+  const hull = isochronePolygon();
+  const isoLayer = new PolygonLayer({
+    id: "isochrone",
+    data: hull ? [hull] : [],
+    getPolygon: d => d,
+    getFillColor: [0, 185, 160, 28],
+    getLineColor: [0, 185, 160, 75],
+    getLineWidth: 1.5,
+    lineWidthUnits: "pixels",
+    stroked: true,
+    filled: true,
+    pickable: false,
+  });
 
   const viewPlaces = state.view === "gems" ? hiddenGems(scored) : scored;
 
@@ -251,7 +309,7 @@ function renderLayers(scored) {
     pickable: false,
   });
 
-  deckgl.setProps({ layers: [restaurants, selectedRing, pinOuter, pinInner] });
+  deckgl.setProps({ layers: [isoLayer, restaurants, selectedRing, pinOuter, pinInner] });
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -275,6 +333,13 @@ function isOpenNow(hours) {
     }
   }
   return false;
+}
+
+function isHeatingUp(p) {
+  return p.recent_share != null
+    && p.recent_share >= HEAT_MIN_SHARE
+    && p.reviews >= HEAT_MIN_REVIEWS
+    && p.reviews <= HEAT_MAX_REVIEWS;
 }
 
 function priceStr(price) { return PRICE_LABELS[price] ?? "?"; }
@@ -333,6 +398,7 @@ function renderList(scored) {
     const openBadge  = openStatus === true  ? `<span class="open-badge open">Open</span>`
                      : openStatus === false ? `<span class="open-badge closed">Closed</span>`
                      : "";
+    const heatBadge  = isHeatingUp(p) ? `<span class="heat-badge">heating up</span>` : "";
 
     return `<div class="result-item" data-id="${p.id}" tabindex="0">
       <div class="result-rank ${isTop ? "top" : ""}">${isGem ? "◆" : i + 1}</div>
@@ -340,6 +406,7 @@ function renderList(scored) {
         <div class="result-name-row">
           <span class="result-name">${escHtml(p.name)}</span>
           ${openBadge}
+          ${heatBadge}
           <a class="maps-link" href="${mapsUrl(p.id)}" target="_blank" rel="noopener" title="Open in Google Maps" onclick="event.stopPropagation()">↗</a>
         </div>
         <div class="result-meta">
@@ -401,6 +468,8 @@ function fmtDist(m) {
 
 function render() {
   if (!state.pin) {
+    lastDistArr = null;
+    lastGraph   = null;
     renderLayers([]);
     renderList([]);
     setStatus("idle", "Click the map to drop a pin");
@@ -419,6 +488,8 @@ function render() {
 
   // Run Dijkstra (synchronous; fast enough for this graph size)
   const distArr = dijkstra(adj, startNode, cutoffSec);
+  lastDistArr   = distArr;
+  lastGraph     = graph;
   const scored  = filterAndScore(distArr, cutoffSec);
   lastScored    = scored;
 
