@@ -101,8 +101,10 @@ def extract(raw: dict) -> "dict | None":
         "types": [t for t in types if not t.startswith("point_of_interest")
                   and t not in ("establishment", "food")],
         # These will be filled by build_networks.py
-        "walk_node": None,
-        "bike_node": None,
+        "walk_node":   None,
+        "bike_node":   None,
+        "walk_snap_m": None,
+        "bike_snap_m": None,
     }
 
 

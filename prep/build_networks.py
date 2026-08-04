@@ -133,8 +133,12 @@ def annotate_places(walk_nodes: list, bike_nodes: list):
 
     for p in places:
         lat, lon = p["lat"], p["lon"]
-        p["walk_node"] = nearest_node_idx(walk_nodes, lat, lon)
-        p["bike_node"] = nearest_node_idx(bike_nodes, lat, lon)
+        wi = nearest_node_idx(walk_nodes, lat, lon)
+        bi = nearest_node_idx(bike_nodes, lat, lon)
+        p["walk_node"]   = wi
+        p["bike_node"]   = bi
+        p["walk_snap_m"] = round(haversine(lat, lon, walk_nodes[wi][0], walk_nodes[wi][1]))
+        p["bike_snap_m"] = round(haversine(lat, lon, bike_nodes[bi][0], bike_nodes[bi][1]))
 
     PLACES_PATH.write_text(json.dumps(data, ensure_ascii=False, separators=(",", ":")))
     print(f"Updated {PLACES_PATH}")

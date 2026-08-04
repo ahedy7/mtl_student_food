@@ -18,6 +18,10 @@ const BASEMAPS = {
   "stadia-toner-lite":"https://tiles.stadiamaps.com/styles/stamen_toner_lite.json",
 };
 
+/* ── Speed constants — must match build_networks.py WALK/BIKE_SPEED_MPS ──── */
+const WALK_MPS = 4800  / 3600;   // 4.8 km/h
+const BIKE_MPS = 15000 / 3600;   // 15.0 km/h
+
 /* ── Heating-up thresholds (tweak as needed) ────────────────────────────── */
 const HEAT_MIN_SHARE   = 0.5;   // >= half the review sample from last 6 months
 const HEAT_MAX_REVIEWS = 300;   // still gaining traction (not yet mobbed)
@@ -183,6 +187,15 @@ function nearestNodeIdx(nodes, lat, lon) {
   return bestI;
 }
 
+function haversineM(lat1, lon1, lat2, lon2) {
+  const R  = 6_371_000;
+  const φ1 = lat1 * Math.PI / 180, φ2 = lat2 * Math.PI / 180;
+  const dφ = (lat2 - lat1) * Math.PI / 180;
+  const dλ = (lon2 - lon1) * Math.PI / 180;
+  const a  = Math.sin(dφ/2) ** 2 + Math.cos(φ1) * Math.cos(φ2) * Math.sin(dλ/2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+
 /* Dijkstra single-source, capped at cutoffSec.
    Returns Float64Array of travel times (Infinity = unreachable/over cap). */
 function dijkstra(adj, start, cutoffSec) {
@@ -247,25 +260,26 @@ function isochronePolygon() {
    SCORING
    ══════════════════════════════════════════════════════════════════════════ */
 
-function filterAndScore(distArr, cutoffSec) {
+function filterAndScore(distArr, cutoffSec, pinSnapSec) {
   const cutoffMin = cutoffSec / 60;
   const m = 50;    // Bayesian prior weight
   const C = meanRating;
-  const nodeKey = state.mode === "walk" ? "walk_node" : "bike_node";
+  const nodeKey  = state.mode === "walk" ? "walk_node"   : "bike_node";
+  const snapKey  = state.mode === "walk" ? "walk_snap_m" : "bike_snap_m";
+  const speedMps = state.mode === "walk" ? WALK_MPS      : BIKE_MPS;
 
-  // Hard filters: reachability + price + category
-  let survivors = places.filter(p => {
-    const t = distArr[p[nodeKey]];
-    if (t === undefined || t > cutoffSec) return false;
-    if (state.prices.size > 0 && !state.prices.has(p.price ?? 0)) return false;
-    if (state.category && !(p.types || []).includes(state.category)) return false;
-    if (state.openNow && isOpenNow(p.hours) === false) return false;
-    return true;
-  }).map(p => ({
-    ...p,
-    travelMin: distArr[p[nodeKey]] / 60,
-    distM:     distArr[p[nodeKey]] * (state.mode === "walk" ? 4800 / 3600 : 15000 / 3600),
-  }));
+  // Hard filters: reachability + price + category; compute total time including both snap legs
+  let survivors = places.flatMap(p => {
+    const graphSec = distArr[p[nodeKey]];
+    if (!isFinite(graphSec)) return [];
+    const placeSnapSec = (p[snapKey] ?? 0) / speedMps;
+    const totalSec = graphSec + pinSnapSec + placeSnapSec;
+    if (totalSec > cutoffSec) return [];
+    if (state.prices.size > 0 && !state.prices.has(p.price ?? 0)) return [];
+    if (state.category && !(p.types || []).includes(state.category)) return [];
+    if (state.openNow && isOpenNow(p.hours) === false) return [];
+    return [{ ...p, travelMin: totalSec / 60, distM: totalSec * speedMps }];
+  });
 
   if (!survivors.length) return [];
 
@@ -579,15 +593,18 @@ function render() {
 
   setStatus("routing", "Routing…");
 
-  // Snap pin to nearest node
-  const startNode = nearestNodeIdx(graph.nodes, state.pin.lat, state.pin.lon);
-  const cutoffSec = state.cutoff * 60;
+  // Snap pin to nearest node; measure off-graph leg in seconds
+  const startNode  = nearestNodeIdx(graph.nodes, state.pin.lat, state.pin.lon);
+  const cutoffSec  = state.cutoff * 60;
+  const speedMps   = state.mode === "walk" ? WALK_MPS : BIKE_MPS;
+  const pinNode    = graph.nodes[startNode];
+  const pinSnapSec = haversineM(state.pin.lat, state.pin.lon, pinNode[0], pinNode[1]) / speedMps;
 
   // Run Dijkstra (synchronous; fast enough for this graph size)
   const distArr = dijkstra(adj, startNode, cutoffSec);
   lastDistArr   = distArr;
   lastGraph     = graph;
-  const scored  = filterAndScore(distArr, cutoffSec);
+  const scored  = filterAndScore(distArr, cutoffSec, pinSnapSec);
   lastScored    = scored;
 
   const count = state.view === "gems" ? hiddenGems(scored).length : scored.length;
