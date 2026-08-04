@@ -38,6 +38,81 @@ const state = {
   search:   "",
 };
 
+/* ── Weight label (top-level so syncUIFromState can call it) ─────────────── */
+function updateWeightLabel() {
+  const pct = Math.round(state.w * 100);
+  document.getElementById("weight-display").textContent = pct === 50 ? "balanced"
+    : pct > 50 ? `${pct}% rating`
+    : `${100 - pct}% proximity`;
+}
+
+/* ── URL state ───────────────────────────────────────────────────────────── */
+function serializeState() {
+  const p = new URLSearchParams();
+  if (state.pin) {
+    p.set("lat", state.pin.lat.toFixed(5));
+    p.set("lon", state.pin.lon.toFixed(5));
+  }
+  if (state.mode !== "walk")    p.set("mode", state.mode);
+  if (state.cutoff !== 20)      p.set("cutoff", state.cutoff);
+  if (state.prices.size > 0)    p.set("prices", [...state.prices].sort().join(","));
+  if (state.w !== 0.6)          p.set("w", state.w);
+  if (state.view !== "best")    p.set("view", state.view);
+  if (state.category)           p.set("cat", state.category);
+  if (state.openNow)            p.set("open", "1");
+  if (state.search)             p.set("q", state.search);
+  return p;
+}
+
+function parseStateFromURL() {
+  const p = new URLSearchParams(location.search);
+  const lat = parseFloat(p.get("lat")), lon = parseFloat(p.get("lon"));
+  if (isFinite(lat) && isFinite(lon) && lat >= 45 && lat <= 46 && lon >= -74 && lon <= -73)
+    state.pin = { lat, lon };
+  const mode = p.get("mode");
+  if (mode === "walk" || mode === "bike") state.mode = mode;
+  const cutoff = parseInt(p.get("cutoff"), 10);
+  if (isFinite(cutoff) && cutoff >= 5 && cutoff <= 60) state.cutoff = cutoff;
+  const pricesStr = p.get("prices");
+  if (pricesStr) state.prices = new Set(pricesStr.split(",").map(Number).filter(n => [0,1,2,3,4].includes(n)));
+  const w = parseFloat(p.get("w"));
+  if (isFinite(w) && w >= 0 && w <= 1) state.w = w;
+  const view = p.get("view");
+  if (view === "best" || view === "gems") state.view = view;
+  const cat = p.get("cat");
+  if (cat) state.category = cat;
+  if (p.get("open") === "1") state.openNow = true;
+  const q = p.get("q");
+  if (q) state.search = q;
+}
+
+let _urlTimer = null;
+function pushStateDebounced() {
+  clearTimeout(_urlTimer);
+  _urlTimer = setTimeout(() => {
+    const qs = serializeState().toString();
+    history.replaceState(null, "", qs ? `?${qs}` : location.pathname);
+  }, 250);
+}
+
+function syncUIFromState() {
+  document.querySelectorAll(".toggle-btn").forEach(b =>
+    b.classList.toggle("active", b.dataset.mode === state.mode));
+  document.getElementById("slider-cutoff").value = state.cutoff;
+  document.getElementById("cutoff-display").textContent = `${state.cutoff} min`;
+  document.getElementById("slider-weight").value = state.w;
+  updateWeightLabel();
+  document.querySelectorAll(".price-btn").forEach(b =>
+    b.classList.toggle("active", state.prices.has(+b.dataset.price)));
+  document.querySelectorAll(".category-row .cat-btn").forEach(b =>
+    b.classList.toggle("active", (b.dataset.cat || null) === state.category));
+  document.getElementById("tab-best").classList.toggle("active", state.view === "best");
+  document.getElementById("tab-gems").classList.toggle("active", state.view === "gems");
+  document.getElementById("btn-open-now").classList.toggle("active", state.openNow);
+  const sb = document.getElementById("search-bar");
+  if (sb) sb.value = state.search;
+}
+
 /* ── Data ────────────────────────────────────────────────────────────────── */
 let places      = [];
 let meanRating  = 0;
@@ -467,6 +542,7 @@ function fmtDist(m) {
    ══════════════════════════════════════════════════════════════════════════ */
 
 function render() {
+  pushStateDebounced();
   if (!state.pin) {
     lastDistArr = null;
     lastGraph   = null;
@@ -640,13 +716,6 @@ function initControls() {
 
   // Weight slider
   const weightSlider = document.getElementById("slider-weight");
-  const weightDisplay = document.getElementById("weight-display");
-  const updateWeightLabel = () => {
-    const pct = Math.round(state.w * 100);
-    weightDisplay.textContent = pct === 50 ? "balanced"
-      : pct > 50 ? `${pct}% rating`
-      : `${100 - pct}% proximity`;
-  };
   updateWeightLabel();
   weightSlider.addEventListener("input", () => {
     state.w = +weightSlider.value;
@@ -704,6 +773,7 @@ function initControls() {
   // Search bar
   document.getElementById("search-bar").addEventListener("input", e => {
     state.search = e.target.value;
+    pushStateDebounced();
     renderList(lastScored);
   });
 
@@ -719,6 +789,18 @@ function initControls() {
   document.getElementById("welcome-close").addEventListener("click", closeModal);
   overlay.addEventListener("click", e => { if (e.target === overlay) closeModal(); });
   document.getElementById("btn-help").addEventListener("click", () => overlay.classList.remove("hidden"));
+
+  // Copy link
+  document.getElementById("btn-copy-link").addEventListener("click", () => {
+    const qs = serializeState().toString();
+    history.replaceState(null, "", qs ? `?${qs}` : location.pathname);
+    navigator.clipboard.writeText(location.href).then(() => {
+      const btn = document.getElementById("btn-copy-link");
+      const orig = btn.textContent;
+      btn.textContent = "✓ Copied!";
+      setTimeout(() => btn.textContent = orig, 1500);
+    });
+  });
 
   // Geolocation
   document.getElementById("btn-locate").addEventListener("click", () => {
@@ -738,11 +820,17 @@ function initControls() {
 
 /* ── Boot ────────────────────────────────────────────────────────────────── */
 window.addEventListener("DOMContentLoaded", async () => {
+  parseStateFromURL();
   initMap();
   initControls();
+  syncUIFromState();
 
   try {
     await loadData();
+    if (state.pin) {
+      flyTo(state.pin.lon, state.pin.lat);
+      render();
+    }
   } catch (err) {
     console.error("Data load failed:", err);
     const el = document.getElementById("pin-status");
