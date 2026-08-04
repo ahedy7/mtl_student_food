@@ -259,7 +259,7 @@ function filterAndScore(distArr, cutoffSec) {
     if (t === undefined || t > cutoffSec) return false;
     if (state.prices.size > 0 && !state.prices.has(p.price ?? 0)) return false;
     if (state.category && !(p.types || []).includes(state.category)) return false;
-    if (state.openNow && isOpenNow(p.hours) !== true) return false;
+    if (state.openNow && isOpenNow(p.hours) === false) return false;
     return true;
   }).map(p => ({
     ...p,
@@ -391,23 +391,44 @@ function renderLayers(scored) {
    RESULTS LIST
    ══════════════════════════════════════════════════════════════════════════ */
 
-/* Returns true (open), false (closed), or null (unknown hours). */
-function isOpenNow(hours) {
+/* Returns {day, hhmm} for the current moment in America/Toronto. */
+function torontoNow() {
+  const parts = new Intl.DateTimeFormat("en", {
+    timeZone: "America/Toronto",
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(new Date());
+  const get = t => parts.find(p => p.type === t)?.value ?? "0";
+  const DAYS = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+  return {
+    day:  DAYS.indexOf(get("weekday")),
+    hhmm: (parseInt(get("hour"), 10) % 24) * 100 + parseInt(get("minute"), 10),
+  };
+}
+
+/* Core check — testable with explicit day/hhmm. Returns true/false/null. */
+function checkHours(hours, day, hhmm) {
   if (!hours || !hours.length) return null;
-  const now  = new Date();
-  const day  = now.getDay();
-  const time = now.getHours() * 100 + now.getMinutes();
   for (const [od, ot, cd, ct] of hours) {
-    if (cd === -1) return true;        // 24/7
+    if (cd === -1) return true;                      // 24/7
     if (od === cd) {
-      if (day === od && time >= ot && time < ct) return true;
+      if (day === od && hhmm >= ot && hhmm < ct) return true;
     } else {
-      // spans midnight
-      if (day === od && time >= ot) return true;
-      if (day === cd && time < ct)  return true;
+      // overnight: closes on the following calendar day
+      if (day === od && hhmm >= ot) return true;
+      if (day === cd && hhmm < ct)  return true;
     }
   }
   return false;
+}
+
+/* Returns true (open), false (closed), or null (hours unknown). */
+function isOpenNow(hours) {
+  if (!hours || !hours.length) return null;
+  const { day, hhmm } = torontoNow();
+  return checkHours(hours, day, hhmm);
 }
 
 function isHeatingUp(p) {
@@ -472,7 +493,7 @@ function renderList(scored) {
     const openStatus = isOpenNow(p.hours);
     const openBadge  = openStatus === true  ? `<span class="open-badge open">Open</span>`
                      : openStatus === false ? `<span class="open-badge closed">Closed</span>`
-                     : "";
+                     : `<span class="open-badge unknown">Hours unknown</span>`;
     const heatBadge  = isHeatingUp(p) ? `<span class="heat-badge">heating up</span>` : "";
 
     return `<div class="result-item" data-id="${p.id}" tabindex="0">
@@ -818,8 +839,40 @@ function initControls() {
   });
 }
 
+/* ── Hours self-tests (results logged to console on load) ────────────────── */
+function _testHours() {
+  const assert = (desc, got, want) => {
+    const ok = got === want;
+    console[ok ? "log" : "error"](`${ok ? "✓" : "✗"} hours: ${desc}  (got ${got}, want ${want})`);
+  };
+  // Normal 11:00–22:00, Monday
+  const normal = [[1, 1100, 1, 2200]];
+  assert("normal inside",       checkHours(normal, 1, 1300), true);
+  assert("normal before open",  checkHours(normal, 1, 1000), false);
+  assert("normal at close",     checkHours(normal, 1, 2200), false);
+  assert("normal wrong day",    checkHours(normal, 2, 1300), false);
+  // Overnight: Fri 22:00 → Sat 02:00
+  const overnight = [[5, 2200, 6, 200]];
+  assert("overnight Fri 23:00", checkHours(overnight, 5, 2300), true);
+  assert("overnight Sat 01:00", checkHours(overnight, 6,  100), true);
+  assert("overnight Sat 02:00", checkHours(overnight, 6,  200), false);
+  assert("overnight Sat 10:00", checkHours(overnight, 6, 1000), false);
+  // Sun→Mon wraparound: Sun 23:00 → Mon 03:00
+  const wrap = [[0, 2300, 1, 300]];
+  assert("wrap Sun 23:30",      checkHours(wrap, 0, 2330), true);
+  assert("wrap Mon 02:00",      checkHours(wrap, 1,  200), true);
+  assert("wrap Mon 03:00",      checkHours(wrap, 1,  300), false);
+  // 24/7
+  const always = [[0, 0, -1, -1]];
+  assert("24/7",                checkHours(always, 3, 300), true);
+  // No hours → null
+  assert("null hours",          checkHours(null,   1, 1200), null);
+  assert("empty hours",         checkHours([],     1, 1200), null);
+}
+
 /* ── Boot ────────────────────────────────────────────────────────────────── */
 window.addEventListener("DOMContentLoaded", async () => {
+  _testHours();
   parseStateFromURL();
   initMap();
   initControls();

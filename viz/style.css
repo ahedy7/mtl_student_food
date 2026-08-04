@@ -312,8 +312,9 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
   border-radius: 4px;
   letter-spacing: 0.04em;
 }
-.open-badge.open   { background: #0a2a18; border: 1px solid #006040; color: #00c070; }
-.open-badge.closed { background: #2a0a0a; border: 1px solid #600020; color: #ff4060; }
+.open-badge.open    { background: #0a2a18; border: 1px solid #006040; color: #00c070; }
+.open-badge.closed  { background: #2a0a0a; border: 1px solid #600020; color: #ff4060; }
+.open-badge.unknown { background: #1a1a1a; border: 1px solid #444;    color: #888;    }
 
 .heat-badge {
   flex-shrink: 0;
