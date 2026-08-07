@@ -314,7 +314,7 @@ function hiddenGems(survivors) {
   const q1 = counts[Math.floor(counts.length * 0.25)];
   return highRated
     .filter(p => p.reviews <= q1)
-    .sort((a, b) => b.rating - a.rating);
+    .sort((a, b) => b._shrunkR - a._shrunkR);
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -520,10 +520,9 @@ function renderList(scored) {
           <a class="maps-link" href="${mapsUrl(p.id)}" target="_blank" rel="noopener" title="Open in Google Maps" onclick="event.stopPropagation()">↗</a>
         </div>
         <div class="result-meta">
-          <span class="result-rating">★ ${p.rating.toFixed(1)}<span class="result-rating-count">(${fmtNum(p.reviews)})</span></span>
+          <span class="result-summary">${tMin} min ${state.mode}, ${(p._shrunkR ?? p.rating).toFixed(1)} (raw ${p.rating.toFixed(1)}, ${fmtNum(p.reviews)} reviews)</span>
           ${pLabel !== "?" ? `<span class="result-price">${pLabel}</span>` : ""}
           ${tLabel ? `<span class="type-badge">${tLabel}</span>` : ""}
-          <span class="result-time">${modeIcon()} ${tMin} min · ${fmtDist(p.distM)}</span>
           ${isGem ? `<span class="gem-badge">few reviews</span>` : ""}
         </div>
         ${state.view === "best" && !isGem
