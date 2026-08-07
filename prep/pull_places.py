@@ -13,6 +13,7 @@ import math
 import os
 import sys
 import time
+from datetime import date
 from pathlib import Path
 
 import requests
@@ -140,6 +141,25 @@ def main():
     OUT_PATH.write_text(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
     print(f"\nWrote {len(places)} places → {OUT_PATH}")
     print(f"Mean rating: {mean_rating}")
+
+    # Free velocity snapshot — review counts are already in the Nearby Search response,
+    # so we snapshot them here at no extra cost.
+    _snapshot_review_history(places, OUT_PATH.parent)
+
+
+def _snapshot_review_history(places: list, data_dir: Path) -> None:
+    """Append today's review counts to review_history.json (no API calls)."""
+    history_path = data_dir / "review_history.json"
+    history = json.loads(history_path.read_text()) if history_path.exists() else {}
+    today = date.today().isoformat()
+    added = 0
+    for p in places:
+        hist = history.setdefault(p["id"], [])
+        if not hist or hist[-1]["date"] != today:
+            hist.append({"date": today, "count": p["reviews"]})
+            added += 1
+    history_path.write_text(json.dumps(history, separators=(",", ":")))
+    print(f"Snapshotted {added} review counts → {history_path}")
 
 
 if __name__ == "__main__":

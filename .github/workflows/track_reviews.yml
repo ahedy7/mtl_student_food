@@ -1,9 +1,7 @@
 name: Track Review Counts
 
 on:
-  schedule:
-    - cron: '0 6 * * 1'   # Every Monday at 06:00 UTC
-  workflow_dispatch:
+  workflow_dispatch:   # manual trigger only — no automatic runs, no API cost
 
 permissions:
   contents: write   # needed to commit review_history.json
@@ -22,9 +20,7 @@ jobs:
       - name: Install dependencies
         run: pip install requests
 
-      - name: Snapshot review counts
-        env:
-          GOOGLE_PLACES_API_KEY: ${{ secrets.GOOGLE_PLACES_API_KEY }}
+      - name: Snapshot review counts (free mode)
         run: python prep/track_reviews.py
 
       - name: Commit updated review history
