@@ -1,27 +1,37 @@
 """
 build_networks.py  –  run once (after pull_places.py)
 Downloads walk and bike street networks for central Montreal via osmnx,
-exports compact JSON the browser can route on, and annotates each place
-in viz/data/places.json with its nearest node in each graph.
+exports binary typed-array files the browser can route on, and annotates
+each place in viz/data/places.json with its nearest node in each graph.
+
+Binary format
+-------------
+{prefix}_nodes.bin   – Float32 pairs [lat0, lon0, lat1, lon1, ...]
+{prefix}_edges.bin   – Uint32 pairs  [from0, to0, from1, to1, ...]
+{prefix}_times.bin   – Uint16        [t0, t1, ...]  seconds, clamped to MAX_TIME_S
+{prefix}_meta.json   – metadata object
+
+MAX_TIME_S = 65535 s ≈ 1092 min; no OSM edge in central Montreal comes close.
 
 Usage:
-    python prep/build_networks.py
-
-Outputs:
-    viz/data/walk_graph.json
-    viz/data/bike_graph.json
-    viz/data/places.json   (updated in-place with walk_node / bike_node)
+    python prep/build_networks.py           # download from OSM and write binary
+    python prep/build_networks.py --convert # convert existing *_graph.json → binary
 """
 
+import array
 import json
 import math
+import sys
 from pathlib import Path
 
-import networkx as nx
-import osmnx as ox
-
-# Allow large single queries and longer timeouts to avoid sub-query storms
-ox.settings.timeout = 300
+try:
+    import networkx as nx
+    import osmnx as ox
+    # Allow large single queries and longer timeouts to avoid sub-query storms
+    ox.settings.timeout = 300
+    _OSM_AVAILABLE = True
+except ImportError:
+    _OSM_AVAILABLE = False
 
 # Central Montreal bounding box  (north, south, east, west)
 # Covers: Plateau, Mile End, Downtown, Old Mtl, Rosemont, Villeray,
@@ -33,6 +43,8 @@ WEST   = -73.650
 
 WALK_SPEED_MPS = 4800 / 3600    # 4.8 km/h
 BIKE_SPEED_MPS = 15000 / 3600   # 15.0 km/h
+
+MAX_TIME_S = 65535  # Uint16 ceiling; ~1092 min — no OSM edge in central Montreal comes close
 
 DATA_DIR = Path(__file__).parent.parent / "viz" / "data"
 PLACES_PATH = DATA_DIR / "places.json"
@@ -60,15 +72,19 @@ def nearest_node_idx(nodes_latlon: list, lat: float, lon: float) -> int:
     return best_i
 
 
-def graph_to_compact_json(G: nx.MultiDiGraph, speed_mps: float) -> tuple[list, list]:
+def graph_to_binary(G: nx.MultiDiGraph, speed_mps: float) -> tuple:
     """
-    Returns (nodes, edges) where:
-      nodes  = [[lat, lon], ...]           sequential 0-based integer IDs
-      edges  = [[from_id, to_id, seconds], ...]   undirected, min-time per pair
+    Convert an osmnx MultiDiGraph to binary typed arrays.
+
+    Returns:
+        node_bytes  – array.array("f") tobytes: [lat0, lon0, lat1, lon1, ...] Float32
+        edge_bytes  – array.array("I") tobytes: [from0, to0, from1, to1, ...] Uint32
+        time_bytes  – array.array("H") tobytes: [t0, t1, ...] Uint16 clamped to MAX_TIME_S
+        node_list   – Python list of [lat, lon] for annotate_places
     """
     osm_ids = list(G.nodes())
     id_map = {osm: i for i, osm in enumerate(osm_ids)}
-    nodes = [
+    node_list = [
         [round(G.nodes[n]["y"], 5), round(G.nodes[n]["x"], 5)]
         for n in osm_ids
     ]
@@ -83,14 +99,59 @@ def graph_to_compact_json(G: nx.MultiDiGraph, speed_mps: float) -> tuple[list, l
         if key not in edge_min or t < edge_min[key]:
             edge_min[key] = t
 
-    edges = [[u, v, round(t)] for (u, v), t in edge_min.items()]
-    return nodes, edges
+    node_arr = array.array("f")
+    for lat, lon in node_list:
+        node_arr.append(lat)
+        node_arr.append(lon)
+
+    edge_arr = array.array("I")
+    time_arr = array.array("H")
+    for (u, v), t in edge_min.items():
+        edge_arr.append(u)
+        edge_arr.append(v)
+        time_arr.append(min(MAX_TIME_S, round(t)))
+
+    return node_arr.tobytes(), edge_arr.tobytes(), time_arr.tobytes(), node_list
+
+
+def write_binary_files(prefix: str, node_bytes: bytes, edge_bytes: bytes,
+                       time_bytes: bytes, node_list: list, speed_mps: float,
+                       network_type: str):
+    """Write the four binary/meta files for a given network prefix."""
+    node_count = len(node_bytes) // 8   # 2 floats × 4 bytes each
+    edge_count = len(time_bytes) // 2   # 1 Uint16 × 2 bytes each
+
+    # Compute bbox from node_list
+    lats = [n[0] for n in node_list]
+    lons = [n[1] for n in node_list]
+    bbox = {
+        "north": max(lats), "south": min(lats),
+        "east":  max(lons), "west":  min(lons),
+    }
+
+    (DATA_DIR / f"{prefix}_nodes.bin").write_bytes(node_bytes)
+    (DATA_DIR / f"{prefix}_edges.bin").write_bytes(edge_bytes)
+    (DATA_DIR / f"{prefix}_times.bin").write_bytes(time_bytes)
+
+    meta = {
+        "network_type": network_type,
+        "speed_kmh": round(speed_mps * 3.6, 1),
+        "node_count": node_count,
+        "edge_count": edge_count,
+        "bbox": bbox,
+        "max_time_clamped_s": MAX_TIME_S,
+    }
+    (DATA_DIR / f"{prefix}_meta.json").write_text(json.dumps(meta))
+
+    total_kb = (len(node_bytes) + len(edge_bytes) + len(time_bytes)) / 1024
+    print(f"  Wrote {prefix}_nodes.bin / _edges.bin / _times.bin / _meta.json  "
+          f"({total_kb:.0f} KB total, {node_count:,} nodes, {edge_count:,} edges)")
 
 
 # ── main ──────────────────────────────────────────────────────────────────────
 
-def download_and_export(network_type: str, speed_mps: float, out_path: Path) -> list:
-    """Download graph, export JSON, return nodes list for place-snapping."""
+def download_and_export(network_type: str, speed_mps: float, prefix: str) -> list:
+    """Download graph, export binary files, return node_list for place-snapping."""
     print(f"\n=== {network_type.upper()} NETWORK ===")
     print("Downloading from OSM …")
     # osmnx 2.x bbox order: (west, south, east, north)
@@ -102,23 +163,66 @@ def download_and_export(network_type: str, speed_mps: float, out_path: Path) -> 
     )
     print(f"  {G.number_of_nodes():,} nodes, {G.number_of_edges():,} edges (raw)")
 
-    nodes, edges = graph_to_compact_json(G, speed_mps)
-    print(f"  → {len(nodes):,} nodes, {len(edges):,} edges (compact, undirected)")
+    node_bytes, edge_bytes, time_bytes, node_list = graph_to_binary(G, speed_mps)
+    edge_count = len(time_bytes) // 2
+    print(f"  → {len(node_list):,} nodes, {edge_count:,} edges (compact, undirected)")
 
-    payload = {
-        "meta": {
-            "network_type": network_type,
-            "speed_kmh": round(speed_mps * 3.6, 1),
-            "bbox": {"north": NORTH, "south": SOUTH, "east": EAST, "west": WEST},
-        },
-        "nodes": nodes,
-        "edges": edges,
-    }
-    out_path.write_text(json.dumps(payload, separators=(",", ":")))
+    write_binary_files(prefix, node_bytes, edge_bytes, time_bytes, node_list,
+                       speed_mps, network_type)
+    return node_list
 
-    size_mb = out_path.stat().st_size / 1_048_576
-    print(f"  Wrote {out_path.name}  ({size_mb:.1f} MB)")
-    return nodes
+
+def convert_json_to_binary():
+    """
+    Convert existing walk_graph.json / bike_graph.json → binary format.
+    Reads nodes as [lat, lon] pairs and edges as [from, to, sec] triples.
+    Reconstructs undirected min-time logic for consistency.
+    """
+    configs = [
+        ("walk", DATA_DIR / "walk_graph.json", WALK_SPEED_MPS),
+        ("bike", DATA_DIR / "bike_graph.json", BIKE_SPEED_MPS),
+    ]
+    results = {}
+    for prefix, json_path, speed_mps in configs:
+        if not json_path.exists():
+            print(f"  {json_path.name} not found – skipping {prefix}")
+            continue
+        print(f"\n=== Converting {json_path.name} → binary ===")
+        payload = json.loads(json_path.read_text())
+        json_nodes = payload["nodes"]   # [[lat, lon], ...]
+        json_edges = payload["edges"]   # [[from, to, sec], ...]
+
+        node_list = [[lat, lon] for lat, lon in json_nodes]
+
+        # Reconstruct undirected min-time edges
+        edge_min: dict[tuple, int] = {}
+        for from_id, to_id, sec in json_edges:
+            key = (min(from_id, to_id), max(from_id, to_id))
+            if key not in edge_min or sec < edge_min[key]:
+                edge_min[key] = sec
+
+        node_arr = array.array("f")
+        for lat, lon in node_list:
+            node_arr.append(lat)
+            node_arr.append(lon)
+
+        edge_arr = array.array("I")
+        time_arr = array.array("H")
+        for (u, v), t in edge_min.items():
+            edge_arr.append(u)
+            edge_arr.append(v)
+            time_arr.append(min(MAX_TIME_S, t))
+
+        node_bytes = node_arr.tobytes()
+        edge_bytes = edge_arr.tobytes()
+        time_bytes = time_arr.tobytes()
+
+        write_binary_files(prefix, node_bytes, edge_bytes, time_bytes, node_list,
+                           speed_mps, payload.get("meta", {}).get("network_type", prefix))
+        results[prefix] = node_list
+        print(f"  Converted {len(node_list):,} nodes, {len(edge_min):,} edges")
+
+    return results
 
 
 def annotate_places(walk_nodes: list, bike_nodes: list):
@@ -145,17 +249,22 @@ def annotate_places(walk_nodes: list, bike_nodes: list):
 
 
 def main():
+    if not _OSM_AVAILABLE:
+        print("ERROR: osmnx / networkx not installed. Cannot download from OSM.")
+        print("Install with: pip install osmnx networkx")
+        sys.exit(1)
     DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-    walk_nodes = download_and_export(
-        "walk", WALK_SPEED_MPS, DATA_DIR / "walk_graph.json"
-    )
-    bike_nodes = download_and_export(
-        "bike", BIKE_SPEED_MPS, DATA_DIR / "bike_graph.json"
-    )
+    walk_nodes = download_and_export("walk", WALK_SPEED_MPS, "walk")
+    bike_nodes = download_and_export("bike", BIKE_SPEED_MPS, "bike")
     annotate_places(walk_nodes, bike_nodes)
     print("\nDone. Commit viz/data/ and push to deploy.")
 
 
 if __name__ == "__main__":
-    main()
+    if "--convert" in sys.argv:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        results = convert_json_to_binary()
+        print("\nConversion complete. Binary files written to viz/data/.")
+    else:
+        main()

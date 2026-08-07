@@ -1,6 +1,6 @@
 /* ─────────────────────────────────────────────────────────────────────────
    Mtl Food  –  client-side app
-   Architecture: load data → build adj lists → Dijkstra on pin drop → score
+   Architecture: load binary graph → build CSR + grid hash → Dijkstra on pin drop → score
    ───────────────────────────────────────────────────────────────────────── */
 
 const INITIAL_VIEW = { longitude: -73.5752, latitude: 45.5088, zoom: 13, pitch: 0, bearing: 0 };
@@ -123,6 +123,7 @@ let places        = [];
 let meanRating    = 0;
 let graphs        = { walk: null, bike: null };
 let adjLists      = { walk: null, bike: null };
+let gridLists     = { walk: null, bike: null };
 let reviewHistory = {};   // place_id → [{date, count}, ...]
 let lastScored    = [];
 let lastDistArr   = null;
@@ -167,24 +168,55 @@ class MinHeap {
   }
 }
 
-function buildAdj(graph) {
-  const n   = graph.nodes.length;
-  const adj = new Array(n);
-  for (let i = 0; i < n; i++) adj[i] = [];
-  for (const [from, to, sec] of graph.edges) {
-    adj[from].push([to, sec]);
-    adj[to].push([from, sec]);
+function buildCSR(edgeFlat, timesFlat, nodeCount) {
+  const edgeCount = timesFlat.length;
+  const degree = new Uint32Array(nodeCount);
+  for (let i = 0; i < edgeCount; i++) {
+    degree[edgeFlat[i * 2]]++;
+    degree[edgeFlat[i * 2 + 1]]++;
   }
-  return adj;
+  const offsets = new Uint32Array(nodeCount + 1);
+  for (let i = 0; i < nodeCount; i++) offsets[i + 1] = offsets[i] + degree[i];
+  const nbrs = new Uint32Array(offsets[nodeCount]);
+  const wts  = new Uint32Array(offsets[nodeCount]);
+  const pos  = new Uint32Array(nodeCount);
+  for (let i = 0; i < edgeCount; i++) {
+    const u = edgeFlat[i * 2], v = edgeFlat[i * 2 + 1], t = timesFlat[i];
+    const pu = offsets[u] + pos[u]++;
+    nbrs[pu] = v; wts[pu] = t;
+    const pv = offsets[v] + pos[v]++;
+    nbrs[pv] = u; wts[pv] = t;
+  }
+  return { offsets, nbrs, wts };
 }
 
-function nearestNodeIdx(nodes, lat, lon) {
+const GRID_DEG = 0.002;  // ~200 m buckets at Montreal's latitude
+
+function buildNodeGrid(nodeFlat) {
+  const grid = new Map();
+  const n = nodeFlat.length >> 1;
+  for (let i = 0; i < n; i++) {
+    const key = `${Math.floor(nodeFlat[i*2] / GRID_DEG)},${Math.floor(nodeFlat[i*2+1] / GRID_DEG)}`;
+    let cell = grid.get(key);
+    if (!cell) { cell = []; grid.set(key, cell); }
+    cell.push(i);
+  }
+  return grid;
+}
+
+function nearestNodeGrid(grid, nodeFlat, lat, lon) {
+  const br = Math.floor(lat / GRID_DEG), bc = Math.floor(lon / GRID_DEG);
   let bestD = Infinity, bestI = 0;
-  for (let i = 0; i < nodes.length; i++) {
-    const dlat = nodes[i][0] - lat;
-    const dlon = nodes[i][1] - lon;
-    const d = dlat * dlat + dlon * dlon;
-    if (d < bestD) { bestD = d; bestI = i; }
+  for (let dr = -1; dr <= 1; dr++) {
+    for (let dc = -1; dc <= 1; dc++) {
+      const cell = grid.get(`${br+dr},${bc+dc}`);
+      if (!cell) continue;
+      for (const i of cell) {
+        const dlat = nodeFlat[i*2]-lat, dlon = nodeFlat[i*2+1]-lon;
+        const d = dlat*dlat + dlon*dlon;
+        if (d < bestD) { bestD = d; bestI = i; }
+      }
+    }
   }
   return bestI;
 }
@@ -199,9 +231,9 @@ function haversineM(lat1, lon1, lat2, lon2) {
 }
 
 /* Dijkstra single-source, capped at cutoffSec.
-   Returns Float64Array of travel times (Infinity = unreachable/over cap). */
-function dijkstra(adj, start, cutoffSec) {
-  const dist = new Float64Array(adj.length).fill(Infinity);
+   Uses CSR adjacency. Returns Float64Array of travel times (Infinity = unreachable/over cap). */
+function dijkstra(csr, nodeCount, start, cutoffSec) {
+  const dist = new Float64Array(nodeCount).fill(Infinity);
   dist[start] = 0;
   const heap = new MinHeap();
   heap.push([0, start]);
@@ -209,13 +241,12 @@ function dijkstra(adj, start, cutoffSec) {
     const [d, u] = heap.pop();
     if (d > dist[u]) continue;
     if (d > cutoffSec) break;
-    const nbrs = adj[u];
-    for (let i = 0; i < nbrs.length; i++) {
-      const [v, w] = nbrs[i];
-      const nd = d + w;
-      if (nd < dist[v]) {
-        dist[v] = nd;
-        heap.push([nd, v]);
+    const end = csr.offsets[u + 1];
+    for (let i = csr.offsets[u]; i < end; i++) {
+      const nd = d + csr.wts[i];
+      if (nd < dist[csr.nbrs[i]]) {
+        dist[csr.nbrs[i]] = nd;
+        heap.push([nd, csr.nbrs[i]]);
       }
     }
   }
@@ -246,16 +277,16 @@ function convexHull(pts) {
 /* Returns [lon,lat] convex hull of all reachable graph nodes, or null. */
 function isochronePolygon() {
   if (!lastGraph || !lastDistArr) return null;
-  const nodes = lastGraph.nodes;
+  const nodes = lastGraph.nodeFlat;
+  const n = nodes.length >> 1;
   const cutoffSec = state.cutoff * 60;
   const pts = [];
-  for (let i = 0; i < nodes.length; i++) {
+  for (let i = 0; i < n; i++) {
     if (lastDistArr[i] <= cutoffSec) {
-      pts.push([nodes[i][1], nodes[i][0]]); // graph stores [lat,lon]; deck.gl wants [lon,lat]
+      pts.push([nodes[i*2+1], nodes[i*2]]); // [lon, lat] for deck.gl
     }
   }
-  if (pts.length < 3) return null;
-  return convexHull(pts);
+  return pts.length >= 3 ? convexHull(pts) : null;
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -608,14 +639,16 @@ function render() {
   setStatus("routing", "Routing…");
 
   // Snap pin to nearest node; measure off-graph leg in seconds
-  const startNode  = nearestNodeIdx(graph.nodes, state.pin.lat, state.pin.lon);
+  const t_nn = performance.now();
+  const startNode  = nearestNodeGrid(gridLists[state.mode], graph.nodeFlat, state.pin.lat, state.pin.lon);
+  console.log(`nearest-node: ${(performance.now()-t_nn).toFixed(2)} ms`);
   const cutoffSec  = state.cutoff * 60;
   const speedMps   = state.mode === "walk" ? WALK_MPS : BIKE_MPS;
-  const pinNode    = graph.nodes[startNode];
-  const pinSnapSec = haversineM(state.pin.lat, state.pin.lon, pinNode[0], pinNode[1]) / speedMps;
+  const pinSnapSec = haversineM(state.pin.lat, state.pin.lon,
+    graph.nodeFlat[startNode*2], graph.nodeFlat[startNode*2+1]) / speedMps;
 
   // Run Dijkstra (synchronous; fast enough for this graph size)
-  const distArr = dijkstra(adj, startNode, cutoffSec);
+  const distArr = dijkstra(adjLists[state.mode], graph.nodeFlat.length >> 1, startNode, cutoffSec);
   lastDistArr   = distArr;
   lastGraph     = graph;
   const scored  = filterAndScore(distArr, cutoffSec, pinSnapSec);
@@ -646,6 +679,22 @@ function flyTo(lon, lat) {
    DATA LOADING
    ══════════════════════════════════════════════════════════════════════════ */
 
+async function loadGraphBinary(prefix) {
+  const t0 = performance.now();
+  const [nodesBuf, edgesBuf, timesBuf, meta] = await Promise.all([
+    fetch(`data/${prefix}_nodes.bin`).then(r => r.arrayBuffer()),
+    fetch(`data/${prefix}_edges.bin`).then(r => r.arrayBuffer()),
+    fetch(`data/${prefix}_times.bin`).then(r => r.arrayBuffer()),
+    fetch(`data/${prefix}_meta.json`).then(r => r.json()),
+  ]);
+  const nodeFlat = new Float32Array(nodesBuf);
+  const edgeFlat = new Uint32Array(edgesBuf);
+  const timesFlat = new Uint16Array(timesBuf);
+  const parseMs = (performance.now() - t0).toFixed(1);
+  console.log(`[mtl-food] ${prefix}: ${meta.node_count} nodes, ${meta.edge_count} edges, parsed in ${parseMs} ms`);
+  return { nodeFlat, edgeFlat, timesFlat, meta };
+}
+
 async function loadData() {
   setStatus("routing", `<span class="spinner-inline"></span>Loading data…`);
 
@@ -656,8 +705,8 @@ async function loadData() {
 
   const [placesData, walkData, bikeData, histData] = await Promise.all([
     fetchJson("data/places.json"),
-    fetchJson("data/walk_graph.json"),
-    fetchJson("data/bike_graph.json"),
+    loadGraphBinary("walk"),
+    loadGraphBinary("bike"),
     fetch("data/review_history.json").then(r => r.ok ? r.json() : {}),
   ]);
 
@@ -667,13 +716,15 @@ async function loadData() {
 
   graphs.walk   = walkData;
   graphs.bike   = bikeData;
-  adjLists.walk = buildAdj(walkData);
-  adjLists.bike = buildAdj(bikeData);
+  adjLists.walk = buildCSR(walkData.edgeFlat, walkData.timesFlat, walkData.meta.node_count);
+  adjLists.bike = buildCSR(bikeData.edgeFlat, bikeData.timesFlat, bikeData.meta.node_count);
+  gridLists.walk = buildNodeGrid(walkData.nodeFlat);
+  gridLists.bike = buildNodeGrid(bikeData.nodeFlat);
 
   console.log(
     `[mtl-food] loaded: ${places.length} places | ` +
-    `walk ${walkData.nodes.length} nodes / ${walkData.edges.length} edges | ` +
-    `bike ${bikeData.nodes.length} nodes / ${bikeData.edges.length} edges`
+    `walk ${walkData.meta.node_count} nodes / ${walkData.meta.edge_count} edges | ` +
+    `bike ${bikeData.meta.node_count} nodes / ${bikeData.meta.edge_count} edges`
   );
 
   setStatus("idle", "Click the map to drop a pin");
