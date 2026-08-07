@@ -23,9 +23,10 @@ const WALK_MPS = 4800  / 3600;   // 4.8 km/h
 const BIKE_MPS = 15000 / 3600;   // 15.0 km/h
 
 /* ── Heating-up thresholds (tweak as needed) ────────────────────────────── */
-const HEAT_MIN_SHARE   = 0.5;   // >= half the review sample from last 6 months
-const HEAT_MAX_REVIEWS = 300;   // still gaining traction (not yet mobbed)
-const HEAT_MIN_REVIEWS = 15;    // need enough sample to trust the ratio
+const HEAT_MIN_SHARE    = 0.5;   // >= half the review sample from last 6 months
+const HEAT_MAX_REVIEWS  = 300;   // still gaining traction (not yet mobbed)
+const HEAT_MIN_REVIEWS  = 15;    // need enough sample to trust the ratio
+const HEAT_MIN_VELOCITY = 1.5;   // reviews/week needed to qualify via velocity
 
 /* ── State ───────────────────────────────────────────────────────────────── */
 const state = {
@@ -118,13 +119,14 @@ function syncUIFromState() {
 }
 
 /* ── Data ────────────────────────────────────────────────────────────────── */
-let places      = [];
-let meanRating  = 0;
-let graphs      = { walk: null, bike: null };
-let adjLists    = { walk: null, bike: null };
-let lastScored  = [];
-let lastDistArr = null;
-let lastGraph   = null;
+let places        = [];
+let meanRating    = 0;
+let graphs        = { walk: null, bike: null };
+let adjLists      = { walk: null, bike: null };
+let reviewHistory = {};   // place_id → [{date, count}, ...]
+let lastScored    = [];
+let lastDistArr   = null;
+let lastGraph     = null;
 
 /* ── deck.gl + MapLibre ──────────────────────────────────────────────────── */
 let deckgl = null;
@@ -445,11 +447,23 @@ function isOpenNow(hours) {
   return checkHours(hours, day, hhmm);
 }
 
+function reviewVelocity(hist) {
+  if (!hist || hist.length < 2) return null;
+  const oldest = hist[0], latest = hist[hist.length - 1];
+  const days = (new Date(latest.date) - new Date(oldest.date)) / 86_400_000;
+  if (days < 1) return null;
+  return (latest.count - oldest.count) / (days / 7);
+}
+
+// Returns null | 'velocity' | 'provisional'
 function isHeatingUp(p) {
-  return p.recent_share != null
-    && p.recent_share >= HEAT_MIN_SHARE
-    && p.reviews >= HEAT_MIN_REVIEWS
-    && p.reviews <= HEAT_MAX_REVIEWS;
+  if (p.reviews < HEAT_MIN_REVIEWS || p.reviews > HEAT_MAX_REVIEWS) return null;
+  const hist = reviewHistory[p.id];
+  if (hist && hist.length >= 3) {
+    const v = reviewVelocity(hist);
+    return v !== null && v >= HEAT_MIN_VELOCITY ? "velocity" : null;
+  }
+  return p.recent_share != null && p.recent_share >= HEAT_MIN_SHARE ? "provisional" : null;
 }
 
 function priceStr(price) { return PRICE_LABELS[price] ?? "?"; }
@@ -508,7 +522,8 @@ function renderList(scored) {
     const openBadge  = openStatus === true  ? `<span class="open-badge open">Open</span>`
                      : openStatus === false ? `<span class="open-badge closed">Closed</span>`
                      : `<span class="open-badge unknown">Hours unknown</span>`;
-    const heatBadge  = isHeatingUp(p) ? `<span class="heat-badge">heating up</span>` : "";
+    const heat = isHeatingUp(p);
+    const heatBadge = heat ? `<span class="heat-badge">${heat === "provisional" ? "heating up (provisional)" : "heating up"}</span>` : "";
 
     return `<div class="result-item" data-id="${p.id}" tabindex="0">
       <div class="result-rank ${isTop ? "top" : ""}">${isGem ? "◆" : i + 1}</div>
@@ -639,14 +654,16 @@ async function loadData() {
     return r.json();
   });
 
-  const [placesData, walkData, bikeData] = await Promise.all([
+  const [placesData, walkData, bikeData, histData] = await Promise.all([
     fetchJson("data/places.json"),
     fetchJson("data/walk_graph.json"),
     fetchJson("data/bike_graph.json"),
+    fetch("data/review_history.json").then(r => r.ok ? r.json() : {}),
   ]);
 
-  places     = placesData.places;
-  meanRating = placesData.meta.mean_rating;
+  places        = placesData.places;
+  meanRating    = placesData.meta.mean_rating;
+  reviewHistory = histData ?? {};
 
   graphs.walk   = walkData;
   graphs.bike   = bikeData;

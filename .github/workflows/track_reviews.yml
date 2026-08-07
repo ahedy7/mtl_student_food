@@ -1,0 +1,39 @@
+name: Track Review Counts
+
+on:
+  schedule:
+    - cron: '0 6 * * 1'   # Every Monday at 06:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write   # needed to commit review_history.json
+
+jobs:
+  track:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Snapshot review counts
+        env:
+          GOOGLE_PLACES_API_KEY: ${{ secrets.GOOGLE_PLACES_API_KEY }}
+        run: python prep/track_reviews.py
+
+      - name: Commit updated review history
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add viz/data/review_history.json
+          git diff --staged --quiet && echo "No changes to commit" || (
+            git commit -m "chore: weekly review snapshot" &&
+            git push
+          )
+        # This commit triggers deploy.yml once (no loop: deploy.yml has no commit step).
