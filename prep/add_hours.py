@@ -3,6 +3,9 @@ add_hours.py  –  run after pull_places.py
 Enriches viz/data/places.json with opening hours via Places Details API.
 Safe to re-run: skips places that already have hours data.
 
+Cost: ~$0.020/call (Basic + Contact Data tiers).
+Prints an estimate and asks for confirmation before making any calls.
+
 Hours are stored as compact arrays:
   [[open_day, open_hhmm, close_day, close_hhmm], ...]
   Day 0=Sun … 6=Sat, time is integer HHMM (e.g. 830 = 8:30am, 2200 = 10pm)
@@ -11,9 +14,10 @@ Hours are stored as compact arrays:
 
 Usage:
     export GOOGLE_PLACES_API_KEY=your_key_here
-    python prep/add_hours.py
+    python prep/add_hours.py [--yes]
 """
 
+import argparse
 import json
 import os
 import sys
@@ -26,10 +30,11 @@ API_KEY = os.environ.get("GOOGLE_PLACES_API_KEY", "")
 if not API_KEY:
     sys.exit("Set GOOGLE_PLACES_API_KEY env var before running.")
 
-DETAILS_URL = "https://maps.googleapis.com/maps/api/place/details/json"
-PLACES_PATH = Path(__file__).parent.parent / "viz" / "data" / "places.json"
-DELAY_S     = 0.06   # 60 ms between requests – well under quota limits
-SAVE_EVERY  = 50     # write progress to disk every N places
+COST_PER_CALL = 0.020   # USD, Basic + Contact Data tiers
+DETAILS_URL   = "https://maps.googleapis.com/maps/api/place/details/json"
+PLACES_PATH   = Path(__file__).parent.parent / "viz" / "data" / "places.json"
+DELAY_S       = 0.06   # 60 ms between requests – well under quota limits
+SAVE_EVERY    = 50     # write progress to disk every N places
 
 
 def fetch_hours(place_id: str) -> "list | None":
@@ -63,11 +68,25 @@ def fetch_hours(place_id: str) -> "list | None":
 
 
 def main():
-    raw   = json.loads(PLACES_PATH.read_text())
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--yes", action="store_true", help="Skip confirmation prompt")
+    args = parser.parse_args()
+
+    raw    = json.loads(PLACES_PATH.read_text())
     places = raw["places"]
 
     todo = [p for p in places if "hours" not in p]
     print(f"{len(todo)} places need hours  ({len(places) - len(todo)} already have data)")
+
+    if not todo:
+        return
+
+    est = len(todo) * COST_PER_CALL
+    print(f"Estimated cost: ~${est:.2f}  ({len(todo)} calls × ${COST_PER_CALL})")
+    if not args.yes:
+        answer = input("Proceed? [y/N] ").strip().lower()
+        if answer != "y":
+            sys.exit("Aborted.")
 
     fetched = errors = 0
     for i, place in enumerate(todo):

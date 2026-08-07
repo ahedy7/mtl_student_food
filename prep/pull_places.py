@@ -3,11 +3,15 @@ pull_places.py  –  run once
 Fetches restaurants & cafes from Google Places API across central Montreal
 and writes viz/data/places.json.
 
+Cost: ~$0.032/call × up to 84 Nearby Search calls ≈ $2.69 max.
+Prints the estimate and asks for confirmation before fetching.
+
 Usage:
     export GOOGLE_PLACES_API_KEY=your_key_here
-    python prep/pull_places.py
+    python prep/pull_places.py [--yes]
 """
 
+import argparse
 import json
 import math
 import os
@@ -110,6 +114,18 @@ def extract(raw: dict) -> "dict | None":
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--yes", action="store_true", help="Skip confirmation prompt")
+    args = parser.parse_args()
+
+    max_calls = len(SEARCH_CENTERS) * len(PLACE_TYPES) * 3   # 3 pages max
+    est = max_calls * 0.032
+    print(f"Estimated cost: up to ~${est:.2f}  ({max_calls} calls max × $0.032 Nearby Search)")
+    if not args.yes:
+        answer = input("Proceed? [y/N] ").strip().lower()
+        if answer != "y":
+            sys.exit("Aborted.")
+
     seen = {}  # type: dict[str, dict]
     total_requests = 0
 

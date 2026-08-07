@@ -6,6 +6,9 @@ NOTE: Place Details returns up to 5 reviews sorted by Google's relevance
 ranking, not chronologically. recent_share is computed from this small
 sample only — it is a rough directional signal, not a full review history.
 
+Cost: ~$0.022/call (Basic + Atmosphere Data tiers).
+Prints an estimate and asks for confirmation before making any calls.
+
 Stores per place:
   recent_share   – float 0-1: fraction of sampled reviews from last 6 months,
                    or null if the API returned no reviews
@@ -15,9 +18,10 @@ Safe to re-run: skips places that already have recent_share set.
 
 Usage:
     export GOOGLE_PLACES_API_KEY=your_key_here
-    python prep/add_recency.py
+    python prep/add_recency.py [--yes]
 """
 
+import argparse
 import json
 import os
 import sys
@@ -30,11 +34,12 @@ API_KEY = os.environ.get("GOOGLE_PLACES_API_KEY", "")
 if not API_KEY:
     sys.exit("Set GOOGLE_PLACES_API_KEY env var before running.")
 
-DETAILS_URL  = "https://maps.googleapis.com/maps/api/place/details/json"
-PLACES_PATH  = Path(__file__).parent.parent / "viz" / "data" / "places.json"
-DELAY_S      = 0.06       # 60 ms between requests
-SAVE_EVERY   = 50
-SIX_MONTHS_S = 6 * 30 * 24 * 3600   # ~180 days in seconds
+COST_PER_CALL = 0.022        # USD, Basic + Atmosphere Data tiers
+DETAILS_URL   = "https://maps.googleapis.com/maps/api/place/details/json"
+PLACES_PATH   = Path(__file__).parent.parent / "viz" / "data" / "places.json"
+DELAY_S       = 0.06        # 60 ms between requests
+SAVE_EVERY    = 50
+SIX_MONTHS_S  = 6 * 30 * 24 * 3600   # ~180 days in seconds
 
 
 def fetch_recency(place_id: str) -> "dict | None":
@@ -62,11 +67,25 @@ def fetch_recency(place_id: str) -> "dict | None":
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--yes", action="store_true", help="Skip confirmation prompt")
+    args = parser.parse_args()
+
     raw    = json.loads(PLACES_PATH.read_text())
     places = raw["places"]
 
     todo = [p for p in places if "recent_share" not in p]
     print(f"{len(todo)} places need recency data  ({len(places) - len(todo)} already done)")
+
+    if not todo:
+        return
+
+    est = len(todo) * COST_PER_CALL
+    print(f"Estimated cost: ~${est:.2f}  ({len(todo)} calls × ${COST_PER_CALL})")
+    if not args.yes:
+        answer = input("Proceed? [y/N] ").strip().lower()
+        if answer != "y":
+            sys.exit("Aborted.")
 
     errors = 0
     for i, place in enumerate(todo):
