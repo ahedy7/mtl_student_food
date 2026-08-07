@@ -16,75 +16,87 @@
         <span class="brand-name">mtl<strong>food</strong></span>
       </header>
 
-      <!-- Pin status -->
-      <div id="pin-status" class="status-pill status-idle">
-        Click the map to drop a pin
+      <!-- Mobile top bar (hidden on desktop) -->
+      <div id="mobile-bar">
+        <div id="pin-status-mobile" class="status-pill status-idle">Drop a pin</div>
+        <button id="btn-filters-toggle">Filters ▾</button>
       </div>
 
-      <!-- Controls -->
-      <section class="control-group">
-        <label class="control-label">Mode</label>
-        <div class="toggle-row">
-          <button id="btn-walk" class="toggle-btn active" data-mode="walk">Walk</button>
-          <button id="btn-bike" class="toggle-btn" data-mode="bike">Bike</button>
+      <!-- Controls panel (vertically resizable) -->
+      <div id="controls-panel">
+        <!-- Pin status -->
+        <div id="pin-status" class="status-pill status-idle">
+          Click the map to drop a pin
         </div>
-      </section>
 
-      <section class="control-group">
-        <label class="control-label">
-          Travel time <span id="cutoff-display" class="value-badge">20 min</span>
-        </label>
-        <input id="slider-cutoff" type="range" min="5" max="60" value="20" step="5" class="slider" />
-      </section>
+        <!-- Controls -->
+        <section class="control-group">
+          <label class="control-label">Mode</label>
+          <div class="toggle-row">
+            <button id="btn-walk" class="toggle-btn active" data-mode="walk">Walk</button>
+            <button id="btn-bike" class="toggle-btn" data-mode="bike">Bike</button>
+          </div>
+        </section>
 
-      <section class="control-group">
-        <label class="control-label">Price</label>
-        <div class="price-row">
-          <button class="price-btn" data-price="1">$</button>
-          <button class="price-btn" data-price="2">$$</button>
-          <button class="price-btn" data-price="3">$$$</button>
-          <button class="price-btn" data-price="4">$$$$</button>
-          <button class="price-btn" data-price="0">?</button>
+        <section class="control-group">
+          <label class="control-label">
+            Travel time <span id="cutoff-display" class="value-badge">20 min</span>
+          </label>
+          <input id="slider-cutoff" type="range" min="5" max="60" value="20" step="5" class="slider" />
+        </section>
+
+        <section class="control-group">
+          <label class="control-label">Price</label>
+          <div class="price-row">
+            <button class="price-btn" data-price="1">$</button>
+            <button class="price-btn" data-price="2">$$</button>
+            <button class="price-btn" data-price="3">$$$</button>
+            <button class="price-btn" data-price="4">$$$$</button>
+            <button class="price-btn" data-price="0">?</button>
+          </div>
+        </section>
+
+        <section class="control-group">
+          <label class="control-label">
+            Proximity ←→ Rating
+            <span id="weight-display" class="value-badge">0.6</span>
+          </label>
+          <input id="slider-weight" type="range" min="0" max="1" value="0.6" step="0.05" class="slider" />
+          <div class="slider-ends"><span>Closer</span><span>Higher-rated</span></div>
+        </section>
+
+        <section class="control-group">
+          <label class="control-label">Category</label>
+          <div class="category-row">
+            <button class="cat-btn active" data-cat="">All</button>
+            <button class="cat-btn" data-cat="restaurant">Restaurant</button>
+            <button class="cat-btn" data-cat="cafe">Café</button>
+            <button class="cat-btn" data-cat="bar">Bar</button>
+            <button class="cat-btn" data-cat="bakery">Bakery</button>
+            <button class="cat-btn" data-cat="meal_takeaway">Takeout</button>
+            <button class="cat-btn" data-cat="grocery_or_supermarket">Grocery</button>
+          </div>
+        </section>
+
+        <!-- View tabs -->
+        <div class="tab-row">
+          <button id="tab-best" class="tab-btn active">Best near you</button>
+          <button id="tab-gems" class="tab-btn">Hidden gems</button>
         </div>
-      </section>
 
-      <section class="control-group">
-        <label class="control-label">
-          Proximity ←→ Rating
-          <span id="weight-display" class="value-badge">0.6</span>
-        </label>
-        <input id="slider-weight" type="range" min="0" max="1" value="0.6" step="0.05" class="slider" />
-        <div class="slider-ends"><span>Closer</span><span>Higher-rated</span></div>
-      </section>
-
-      <section class="control-group">
-        <label class="control-label">Category</label>
-        <div class="category-row">
-          <button class="cat-btn active" data-cat="">All</button>
-          <button class="cat-btn" data-cat="restaurant">Restaurant</button>
-          <button class="cat-btn" data-cat="cafe">Café</button>
-          <button class="cat-btn" data-cat="bar">Bar</button>
-          <button class="cat-btn" data-cat="bakery">Bakery</button>
-          <button class="cat-btn" data-cat="meal_takeaway">Takeout</button>
-          <button class="cat-btn" data-cat="grocery_or_supermarket">Grocery</button>
+        <!-- Search -->
+        <div id="search-wrap">
+          <input id="search-bar" type="text" placeholder="Search places…" autocomplete="off" />
         </div>
-      </section>
 
-      <!-- View tabs -->
-      <div class="tab-row">
-        <button id="tab-best" class="tab-btn active">Best near you</button>
-        <button id="tab-gems" class="tab-btn">Hidden gems</button>
-      </div>
+        <!-- Filter bar -->
+        <div id="filter-bar">
+          <button id="btn-open-now" class="cat-btn">Open now</button>
+        </div>
+      </div><!-- /#controls-panel -->
 
-      <!-- Search -->
-      <div id="search-wrap">
-        <input id="search-bar" type="text" placeholder="Search places…" autocomplete="off" />
-      </div>
-
-      <!-- Filter bar -->
-      <div id="filter-bar">
-        <button id="btn-open-now" class="cat-btn">Open now</button>
-      </div>
+      <!-- Vertical resize handle -->
+      <div id="results-resizer"><span class="resizer-grip">⋯</span></div>
 
       <!-- Results list -->
       <div id="results-list">
@@ -156,6 +168,9 @@
         <button id="welcome-close">Got it — show me the map</button>
       </div>
     </div>
+
+    <!-- ── Resize handle ────────────────────────────────── -->
+    <div id="sidebar-resizer"></div>
 
     <!-- ── Map container ──────────────────────────────── -->
     <div id="map-wrap">

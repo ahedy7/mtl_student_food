@@ -669,6 +669,8 @@ function setStatus(type, msg) {
   const el = document.getElementById("pin-status");
   el.className = `status-pill status-${type}`;
   el.innerHTML = msg;
+  const mob = document.getElementById("pin-status-mobile");
+  if (mob) { mob.className = `status-pill status-${type}`; mob.innerHTML = msg; }
 }
 
 function flyTo(lon, lat) {
@@ -800,6 +802,17 @@ function initMap() {
 }
 
 function initControls() {
+  // Mobile filters toggle
+  const filtersBtn = document.getElementById("btn-filters-toggle");
+  const controlsPanel = document.getElementById("controls-panel");
+  if (filtersBtn && controlsPanel) {
+    filtersBtn.addEventListener("click", () => {
+      const open = controlsPanel.classList.toggle("open");
+      filtersBtn.classList.toggle("open", open);
+      filtersBtn.textContent = open ? "Filters ▴" : "Filters ▾";
+    });
+  }
+
   // Mode toggle
   document.querySelectorAll(".toggle-btn").forEach(btn => {
     btn.addEventListener("click", () => {
@@ -954,12 +967,77 @@ function _testHours() {
   assert("empty hours",         checkHours([],     1, 1200), null);
 }
 
+/* ── Results panel vertical resize ──────────────────────────────────────── */
+function initResultsResizer() {
+  const resizer  = document.getElementById("results-resizer");
+  const controls = document.getElementById("controls-panel");
+  if (!resizer || !controls) return;
+
+  let startY, startH;
+
+  resizer.addEventListener("mousedown", e => {
+    startY = e.clientY;
+    startH = controls.offsetHeight;
+    resizer.classList.add("dragging");
+    document.body.style.cursor = "row-resize";
+    document.body.style.userSelect = "none";
+
+    function onMove(e) {
+      const h = Math.min(Math.max(startH + (e.clientY - startY), 80), window.innerHeight - 120);
+      controls.style.height = h + "px";
+    }
+    function onUp() {
+      resizer.classList.remove("dragging");
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    }
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  });
+}
+
+/* ── Sidebar resize handle ───────────────────────────────────────────────── */
+function initSidebarResizer() {
+  const resizer = document.getElementById("sidebar-resizer");
+  const sidebar = document.getElementById("sidebar");
+  if (!resizer || !sidebar) return;
+
+  let startX, startW;
+
+  resizer.addEventListener("mousedown", e => {
+    startX = e.clientX;
+    startW = sidebar.offsetWidth;
+    resizer.classList.add("dragging");
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+
+    function onMove(e) {
+      const w = Math.min(Math.max(startW + (e.clientX - startX), 280), 700);
+      sidebar.style.width = w + "px";
+      document.documentElement.style.setProperty("--sidebar-w", w + "px");
+    }
+    function onUp() {
+      resizer.classList.remove("dragging");
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    }
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  });
+}
+
 /* ── Boot ────────────────────────────────────────────────────────────────── */
 window.addEventListener("DOMContentLoaded", async () => {
   _testHours();
   parseStateFromURL();
   initMap();
   initControls();
+  initResultsResizer();
+  initSidebarResizer();
   syncUIFromState();
 
   try {

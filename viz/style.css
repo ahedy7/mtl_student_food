@@ -37,6 +37,68 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
   z-index: 10;
 }
 
+#controls-panel {
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+#results-resizer {
+  height: 10px;
+  flex-shrink: 0;
+  cursor: row-resize;
+  background: var(--surface2);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 11;
+  transition: background 0.15s;
+}
+#results-resizer .resizer-grip {
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1;
+  pointer-events: none;
+  letter-spacing: 2px;
+}
+#results-resizer:hover,
+#results-resizer.dragging {
+  background: var(--accent-dim);
+}
+#results-resizer:hover .resizer-grip,
+#results-resizer.dragging .resizer-grip {
+  color: var(--accent);
+}
+
+#sidebar-resizer {
+  width: 12px;
+  flex-shrink: 0;
+  cursor: col-resize;
+  background: var(--surface2);
+  border-left: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 11;
+  transition: background 0.15s;
+}
+#sidebar-resizer::after {
+  content: "⋮";
+  color: var(--text-muted);
+  font-size: 16px;
+  pointer-events: none;
+}
+#sidebar-resizer:hover,
+#sidebar-resizer.dragging {
+  background: var(--accent-dim);
+}
+#sidebar-resizer:hover::after,
+#sidebar-resizer.dragging::after {
+  color: var(--accent);
+}
+
 #map-wrap {
   position: relative;
   flex: 1;
@@ -697,12 +759,15 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
 }
 #welcome-close:hover { background: #009970; }
 
+/* mobile bar — hidden on desktop */
+#mobile-bar { display: none; }
+
 /* ── Mobile layout ───────────────────────────────────────────────────────── */
 @media (max-width: 700px) {
   #app { flex-direction: column; }
 
   #map-wrap {
-    height: 38vh;
+    height: 45vh;
     order: 1;
     flex: none;
     width: 100%;
@@ -710,26 +775,61 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
 
   #sidebar {
     width: 100%;
-    height: 62vh;
+    height: 55vh;
     border-right: none;
     border-top: 1px solid var(--border);
     order: 2;
-    overflow: hidden; /* keep flex: 1 on results-list working */
+    overflow: hidden;
   }
 
-  /* hide brand on mobile to save space */
+  /* hide desktop brand, show mobile bar */
   #brand { display: none; }
 
-  /* collapse controls into a compact scrollable strip */
-  #controls-wrap {
-    overflow-x: auto;
-    overflow-y: hidden;
+  #mobile-bar {
     display: flex;
-    flex-direction: column;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 6px 12px;
     flex-shrink: 0;
+    border-bottom: 1px solid var(--border);
   }
 
-  #pin-status { margin: 8px 12px 4px; font-size: 11px; padding: 5px 10px; }
+  #pin-status-mobile {
+    flex: 1;
+    font-size: 11px;
+    padding: 5px 10px;
+    margin: 0;
+  }
+
+  #btn-filters-toggle {
+    flex-shrink: 0;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--text);
+    font-size: 12px;
+    padding: 5px 10px;
+    cursor: pointer;
+  }
+  #btn-filters-toggle.open {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  /* controls hidden by default on mobile; .open shows them */
+  #controls-panel {
+    display: none;
+    overflow-y: auto;
+    max-height: 40vh;
+  }
+  #controls-panel.open { display: block; }
+
+  /* hide desktop pin-status inside controls panel on mobile */
+  #controls-panel #pin-status { display: none; }
+
+  /* hide vertical resizer on mobile */
+  #results-resizer { display: none; }
 
   .control-group { padding: 6px 12px 0; }
   .control-label { font-size: 10px; margin-bottom: 5px; }
