@@ -1,4 +1,6 @@
 """
+DEPRECATED – use enrich_places.py instead (fetches hours + recency in one call).
+
 add_recency.py  –  run after add_hours.py
 Enriches viz/data/places.json with a review-recency signal per place.
 

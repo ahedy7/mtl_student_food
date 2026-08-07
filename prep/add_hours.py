@@ -1,4 +1,6 @@
 """
+DEPRECATED – use enrich_places.py instead (fetches hours + recency in one call).
+
 add_hours.py  –  run after pull_places.py
 Enriches viz/data/places.json with opening hours via Places Details API.
 Safe to re-run: skips places that already have hours data.
