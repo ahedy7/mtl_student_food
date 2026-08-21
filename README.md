@@ -164,28 +164,42 @@ bbox have no nearby graph node, and snapping refuses to place them.
 **`pull_places.py` — where places come from:**
 
 ```python
-SEARCH_CENTERS = [(45.5236, -73.5803), ...]   # 14 neighbourhood centres
+SEARCH_CENTERS = [(45.55280, -73.60873, 1131), ...]   # (lat, lon, radius_m)
 PLACE_TYPES    = ["restaurant", "cafe"]
-RADIUS_M       = 1200
 ```
+
+Radius varies per centre. Nearby Search caps at 60 results per (centre, type),
+so cells are subdivided until none holds more than ~30 known places of either
+type — see *Coverage sizing* below.
 
 **`build_networks.py` — where routing is possible:**
 
 ```python
-NORTH =  45.555     # Rosemont / Villeray
-SOUTH =  45.475     # excludes Verdun and Île-des-Sœurs
-EAST  = -73.510     # Hochelaga
-WEST  = -73.650     # NDG / Côte-des-Neiges
+NORTH =  45.560     # Rosemont / Villeray
+SOUTH =  45.445     # Verdun / Île-des-Sœurs
+EAST  = -73.505     # Hochelaga
+WEST  = -73.660     # NDG / Monkland
 ```
 
-For gapless coverage, centres should sit on a hex grid at `radius × √3` ≈ 2078 m
-spacing — closer than that is redundant overlap, farther leaves holes. Keep the
-bbox a little wider than the outermost centre so edge places still have graph
-nodes around them.
+### Coverage sizing
 
-Known gaps in the current config: Verdun and Île-des-Sœurs fall south of `SOUTH`
-entirely; Westmount, Monkland Village, and Petite-Italie sit in coverage holes
-between centres.
+Uniform centres do not work here, because the binding constraint is not area but
+Google's 60-result ceiling per (centre, type). Under the previous 14-centre
+layout, **13 of 14 centres were at or past that ceiling** — the densest held 178
+restaurants and 116 cafés against a cap of 60 — so most of the corpus was never
+retrievable at all, and what was lost was the least prominent tail.
+
+Centres are therefore produced by recursive quadtree subdivision: start at 3200 m
+squares, split any square holding more than ~30 known places of either type, floor
+at 400 m. Radius is each square's half-diagonal, so circles cover their squares
+with no gaps; empty squares are dropped, which removes the river, Mount Royal, and
+the rail yards automatically. That yields 60 centres across four radius tiers
+(2263 / 1131 / 566 / 283 m).
+
+The threshold sits at 30 rather than 60 because the counts driving it come from an
+already-truncated pull and are lower bounds. `pull_places.py` flags any query that
+comes back with 60 results, so a cell that still saturates is visible immediately
+and can be subdivided in a follow-up pull.
 
 Changing either setting means re-running `pull_places.py` (paid) and
 `build_networks.py` (free) — and the bbox governs data size, since node count

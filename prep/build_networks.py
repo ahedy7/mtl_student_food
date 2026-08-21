@@ -37,12 +37,17 @@ except ImportError:
     _OSM_AVAILABLE = False
 
 # Central Montreal bounding box  (north, south, east, west)
-# Covers: Plateau, Mile End, Downtown, Old Mtl, Rosemont, Villeray,
-#         NDG, Côte-des-Neiges, Verdun, Hochelaga
-NORTH  =  45.555
-SOUTH  =  45.475
-EAST   = -73.510
-WEST   = -73.650
+# Covers: Plateau, Mile End, Downtown, Old Mtl, Rosemont, Villeray, NDG,
+#         Côte-des-Neiges, Hochelaga, Westmount, Monkland, Verdun, Île-des-Sœurs
+#
+# MUST stay in step with SEARCH_CENTERS in pull_places.py. A place pulled from
+# outside this box has no graph node near it, and snapping refuses to place it
+# (500 m ceiling) rather than guessing — so widening the centres without
+# widening the bbox fails the build instead of shipping wrong travel times.
+NORTH  =  45.560
+SOUTH  =  45.445
+EAST   = -73.505
+WEST   = -73.660
 
 WALK_SPEED_MPS = 4800 / 3600    # 4.8 km/h
 BIKE_SPEED_MPS = 15000 / 3600   # 15.0 km/h

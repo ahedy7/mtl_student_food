@@ -3,7 +3,7 @@ pull_places.py  –  run once
 Fetches restaurants & cafes from Google Places API across central Montreal
 and writes viz/data/places.json.
 
-Cost: ~$0.032/call × up to 84 Nearby Search calls ≈ $2.69 max.
+Cost: ~$0.032/call × up to 360 Nearby Search calls ≈ $11.52 max.
 Prints the estimate and asks for confirmation before fetching.
 
 Usage:
@@ -29,34 +29,119 @@ if not API_KEY:
 NEARBY_URL = "https://maps.googleapis.com/maps/api/place/nearbysearch/json"
 OUT_PATH = Path(__file__).parent.parent / "viz" / "data" / "places.json"
 
-# Search centers covering central Montreal; radius 1200 m each
+# Search centres, sized by the saturation rule rather than laid out uniformly.
+#
+# Nearby Search returns at most 60 results per (centre, type) — 3 pages of 20 —
+# ranked by prominence. A centre covering more than 60 restaurants therefore
+# drops the least prominent ones silently, which is precisely the long tail the
+# "Hidden gems" view is built from. So cells are subdivided until no cell holds
+# more than ~30 known places of either type, leaving headroom under the ceiling.
+#
+# Produced by recursive quadtree subdivision: start at 3200 m squares, split any
+# square over the threshold, floor at 400 m. Radius is each square's half-diagonal,
+# so the circles cover their squares with no gaps. Empty squares are dropped,
+# which removes the river, Mount Royal, and the rail yards automatically.
+#
+# Counts in the comments are from the previous (truncated) pull, so they are
+# lower bounds. Re-run the subdivision against real counts after this pull.
+#
+#   (lat, lon, radius_m)
 SEARCH_CENTERS = [
-    (45.5236, -73.5803),   # Plateau-Mont-Royal
-    (45.5282, -73.5985),   # Mile End
-    (45.5048, -73.5772),   # Downtown
-    (45.5076, -73.5539),   # Old Montreal
-    (45.4976, -73.5797),   # Shaughnessy Village / UQAM
-    (45.5399, -73.5983),   # Rosemont
-    (45.5459, -73.6100),   # Villeray
-    (45.4860, -73.6261),   # Notre-Dame-de-Grâce
-    (45.4900, -73.5700),   # St-Henri / Griffintown
-    (45.5150, -73.6100),   # Côte-des-Neiges
-    (45.5030, -73.5620),   # Quartier latin
-    (45.5320, -73.5470),   # Hochelaga
-    (45.5080, -73.5850),   # Guy-Concordia / Loyola corridor
-    (45.4820, -73.5820),   # Verdun
+    # ---- radius 1131 m ----
+    (45.55280, -73.60873, 1131),  # 14r/13c known
+    (45.55280, -73.58823, 1131),  # 10r/2c known
+    # ---- radius 2263 m ----
+    (45.54561, -73.63949, 2263),  # 7r/4c known
+    (45.54561, -73.55747, 2263),  # 27r/12c known
+    # ---- radius 566 m ----
+    (45.54202, -73.61386, 566),  # 14r/15c known
+    (45.54202, -73.60361, 566),  # 11r/10c known
+    # ---- radius 1131 m ----
+    (45.53842, -73.58823, 1131),  # 17r/20c known
+    # ---- radius 566 m ----
+    (45.53483, -73.61386, 566),  # 21r/5c known
+    (45.53483, -73.60361, 566),  # 23r/17c known
+    (45.52764, -73.61386, 566),  # 3r/3c known
+    (45.52764, -73.60361, 566),  # 8r/10c known
+    (45.52764, -73.59335, 566),  # 12r/13c known
+    (45.52764, -73.58310, 566),  # 14r/16c known
+    # ---- radius 1131 m ----
+    (45.52405, -73.56772, 1131),  # 29r/8c known
+    (45.52405, -73.54722, 1131),  # 26r/9c known
+    # ---- radius 283 m ----
+    (45.52225, -73.59592, 283),  # 11r/6c known
+    (45.52225, -73.59079, 283),  # 5r/3c known
+    # ---- radius 566 m ----
+    (45.52046, -73.61386, 566),  # 26r/11c known
+    (45.52046, -73.60361, 566),  # 18r/12c known
+    (45.52046, -73.58310, 566),  # 21r/22c known
+    # ---- radius 283 m ----
+    (45.51866, -73.59592, 283),  # 13r/4c known
+    (45.51866, -73.59079, 283),  # 3r/3c known
+    # ---- radius 2263 m ----
+    (45.51686, -73.63949, 2263),  # 1r/1c known
+    (45.51686, -73.51646, 2263),  # 3r/0c known
+    # ---- radius 566 m ----
+    (45.51327, -73.57285, 566),  # 17r/9c known
+    (45.51327, -73.56260, 566),  # 13r/8c known
+    # ---- radius 1131 m ----
+    (45.50968, -73.60873, 1131),  # 2r/1c known
+    (45.50968, -73.58823, 1131),  # 7r/8c known
+    (45.50968, -73.54722, 1131),  # 27r/22c known
+    # ---- radius 283 m ----
+    (45.50788, -73.57541, 283),  # 5r/6c known
+    (45.50788, -73.57029, 283),  # 9r/5c known
+    # ---- radius 566 m ----
+    (45.50609, -73.56260, 566),  # 24r/17c known
+    # ---- radius 283 m ----
+    (45.50429, -73.57541, 283),  # 6r/7c known
+    (45.50429, -73.57029, 283),  # 15r/12c known
+    (45.50070, -73.57541, 283),  # 28r/15c known
+    (45.50070, -73.57029, 283),  # 15r/6c known
+    # ---- radius 566 m ----
+    (45.49890, -73.56260, 566),  # 19r/14c known
+    # ---- radius 283 m ----
+    (45.49710, -73.57541, 283),  # 24r/5c known
+    (45.49710, -73.57029, 283),  # 5r/4c known
+    # ---- radius 1131 m ----
+    (45.49531, -73.62924, 1131),  # 9r/5c known
+    (45.49531, -73.60873, 1131),  # partial data (Westmount)
+    (45.49531, -73.58823, 1131),  # partial data (Westmount)
+    (45.49531, -73.54722, 1131),  # 11r/3c known
+    # ---- radius 566 m ----
+    (45.49171, -73.57285, 566),  # 4r/0c known
+    (45.49171, -73.56260, 566),  # 11r/9c known
+    (45.48453, -73.63437, 566),  # 16r/10c known
+    (45.48453, -73.62411, 566),  # 25r/7c known
+    (45.48453, -73.59335, 566),  # partial data (Westmount)
+    (45.48453, -73.58310, 566),  # partial data (Westmount)
+    # ---- radius 1131 m ----
+    (45.48093, -73.60873, 1131),  # UNKNOWN density (Westmount)
+    (45.48093, -73.56772, 1131),  # 23r/23c known
+    # ---- radius 566 m ----
+    (45.47734, -73.63437, 566),  # partial data (Monkland / NDG west)
+    (45.47734, -73.62411, 566),  # partial data (Monkland / NDG west)
+    (45.47734, -73.59335, 566),  # partial data (Verdun / Wellington)
+    (45.47734, -73.58310, 566),  # partial data (Verdun / Wellington)
+    # ---- radius 1131 m ----
+    (45.46656, -73.56772, 1131),  # UNKNOWN density (Verdun / Wellington)
+    (45.46656, -73.54722, 1131),  # UNKNOWN density (Verdun / Wellington)
+    # ---- radius 2263 m ----
+    (45.45937, -73.59848, 2263),  # partial data (Verdun / Wellington)
+    # ---- radius 1131 m ----
+    (45.45219, -73.56772, 1131),  # UNKNOWN density (Verdun / Wellington)
+    (45.45219, -73.54722, 1131),  # UNKNOWN density (Verdun / Wellington)
 ]
 
 PLACE_TYPES = ["restaurant", "cafe"]
-RADIUS_M = 1200
 DELAY_S = 2.1   # API requires >2 s between page_token requests
 
 
-def fetch_nearby(lat: float, lon: float, place_type: str) -> "list[dict]":
+def fetch_nearby(lat: float, lon: float, radius_m: int, place_type: str) -> "list[dict]":
     params = {
         "key": API_KEY,
         "location": f"{lat},{lon}",
-        "radius": RADIUS_M,
+        "radius": radius_m,
         "type": place_type,
     }
     results = []
@@ -120,7 +205,8 @@ def main():
 
     max_calls = len(SEARCH_CENTERS) * len(PLACE_TYPES) * 3   # 3 pages max
     est = max_calls * 0.032
-    print(f"Estimated cost: up to ~${est:.2f}  ({max_calls} calls max × $0.032 Nearby Search)")
+    print(f"Centres: {len(SEARCH_CENTERS)}  ({len(PLACE_TYPES)} types x 3 pages each)")
+    print(f"Estimated cost: up to ~${est:.2f}  ({max_calls} calls max x $0.032 Nearby Search)")
     if not args.yes:
         answer = input("Proceed? [y/N] ").strip().lower()
         if answer != "y":
@@ -129,16 +215,23 @@ def main():
     seen = {}  # type: dict[str, dict]
     total_requests = 0
 
-    for i, (lat, lon) in enumerate(SEARCH_CENTERS):
+    capped = 0
+    for i, (lat, lon, radius_m) in enumerate(SEARCH_CENTERS):
         for ptype in PLACE_TYPES:
-            print(f"[{i+1}/{len(SEARCH_CENTERS)}] ({lat:.4f},{lon:.4f}) type={ptype} …", flush=True)
-            raws = fetch_nearby(lat, lon, ptype)
+            print(f"[{i+1}/{len(SEARCH_CENTERS)}] ({lat:.4f},{lon:.4f}) r={radius_m}m "
+                  f"type={ptype} …", flush=True)
+            raws = fetch_nearby(lat, lon, radius_m, ptype)
             total_requests += 1
             for r in raws:
                 p = extract(r)
                 if p and p["id"] not in seen:
                     seen[p["id"]] = p
-            print(f"  +{len(raws)} results, {len(seen)} unique so far")
+            # 60 means the API ceiling was hit and the long tail was dropped;
+            # that cell needs subdividing before the data can be trusted.
+            hit_cap = len(raws) >= 60
+            capped += hit_cap
+            print(f"  +{len(raws)} results, {len(seen)} unique so far"
+                  + ("   << HIT 60 CAP - subdivide this cell" if hit_cap else ""))
             time.sleep(0.3)
 
     places = list(seen.values())
