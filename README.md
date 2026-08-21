@@ -24,6 +24,9 @@ prep/                  offline pipeline (Python, run manually)
   track_reviews.py       review-count snapshots for velocity            [free by default]
   snap.py                shared snapping + bound checks (imported, not run)
   graph.py               binary graph loader + Dijkstra, for verification
+  jsonio.py              UTF-8 atomic JSON read/write (imported, not run)
+  rawbank.py             append-only log of raw API responses (imported, not run)
+  data/                  raw_responses.jsonl — gitignored, back up out of band
 viz/                   the app — this directory is what gets deployed
   index.html app.js style.css
   data/                  committed output of prep/
@@ -36,17 +39,26 @@ viz/                   the app — this directory is what gets deployed
 
 ## Run order
 
-Run these in order. Only the first and fourth cost money.
+Run these in order. The first and third cost money; the rest are free.
 
 ```bash
 cd prep
 pip install -r requirements.txt
 export GOOGLE_PLACES_API_KEY=your_key_here     # PowerShell: $env:GOOGLE_PLACES_API_KEY="..."
 
-python pull_places.py          # 1. fetch places          ~$2.69   PAID
+python pull_places.py          # 1. fetch places          ~$11.52  PAID
 python build_networks.py       # 2. build graphs + snap    free
 python enrich_places.py        # 3. hours + recency       ~$4.40   PAID
 ```
+
+> **Check that `pip` and `python` are the same interpreter** before assuming an
+> install worked. With Anaconda alongside a system Python they often are not:
+> `pip install osmnx` can report success while `python prep/build_networks.py`
+> still reports osmnx missing, because they resolved to different environments.
+> Use `python -m pip install` to remove the ambiguity, or invoke the interpreter
+> that has the packages explicitly. Only `build_networks.py` needs third-party
+> packages — everything else in `prep/` is stdlib-only, which is why the CI data
+> check needs no install step.
 
 Then commit `viz/data/` and push — `deploy.yml` publishes to Pages on every push
 to `main`.
@@ -63,12 +75,15 @@ matters: a centre covering more than ~60 restaurants returns only the 60 most
 built from exactly that tail, dense areas need more, tighter centres rather than
 fewer, wider ones.
 
+Cost: `centres × 2 types × 3 pages × $0.032`. With the current 60 centres that is
+360 calls ≈ **$11.52** at the ceiling; the real figure is lower wherever a cell
+returns fewer than 3 pages. The script prints the estimate, reports what it will
+skip as already banked, and waits for confirmation.
+
 | Flag | Effect |
 |---|---|
 | `--yes` | Skip the cost confirmation prompt |
-
-Cost: `centres × 2 types × 3 pages × $0.032`. With the current 14 centres that is
-84 calls ≈ **$2.69**. The script prints the estimate and waits for confirmation.
+| `--force` | Re-fetch every centre, ignoring the bank (full price) |
 
 ### Backing up the raw bank
 
@@ -148,8 +163,15 @@ data. Safe to re-run: skips places that already have both fields.
 | `--dry-run` | Show the plan, make no calls |
 | `--yes` | Skip the cost confirmation prompt |
 
-Places are prioritised most-reviewed-first, so a limit still covers what users are
-most likely to see. Cost is `calls × $0.022`.
+Hidden-gems candidates are enriched **first** — rating ≥ 4.3 with a review count in
+the bottom quartile — then everything else, each tier most-reviewed-first. Ordering
+by review count alone is the inverse of what the Hidden gems view surfaces, so a
+`--limit` cut would remove exactly the places that view is built around. Cost is
+`calls × $0.022`.
+
+At the current 3003-place corpus there are 417 gem candidates, so `--limit 200`
+covers about 48% of them; 417 calls (~$9.17) would cover all. Places without hours
+render a "Hours unknown" badge rather than being hidden.
 
 > Recency caveat: Google returns at most 5 reviews, ranked by relevance rather
 > than date. `recent_share` is a rough directional signal, not a review history.
@@ -173,12 +195,12 @@ pull, so you rarely need it by hand.
 
 | Script | Cost | Notes |
 |---|---|---|
-| `pull_places.py` | ~$2.69 | 84 calls at 14 centres |
+| `pull_places.py` | ~$11.52 | 360 calls at 60 centres, at the ceiling |
 | `build_networks.py` | **free** | OSM only |
 | `reannotate_places.py` | **free** | No network access at all |
 | `enrich_places.py` | ~$4.40 | Default `--limit 200` |
 | `track_reviews.py` | **free** | Unless `--api` |
-| **Full pipeline** | **~$7.10** | |
+| **Full pipeline** | **~$15.92** | Re-parsing from the bank is always free |
 
 Every paid script prints an estimate and waits for confirmation unless you pass
 `--yes`. All of them are re-run safe.
@@ -198,8 +220,8 @@ PLACE_TYPES    = ["restaurant", "cafe"]
 ```
 
 Radius varies per centre. Nearby Search caps at 60 results per (centre, type),
-so cells are subdivided until none holds more than ~30 known places of either
-type — see *Coverage sizing* below.
+so cells are subdivided until no query comes back saturated — see *Coverage
+sizing* below.
 
 **`build_networks.py` — where routing is possible:**
 
@@ -225,10 +247,17 @@ with no gaps; empty squares are dropped, which removes the river, Mount Royal, a
 the rail yards automatically. That yields 60 centres across four radius tiers
 (2263 / 1131 / 566 / 283 m).
 
-The threshold sits at 30 rather than 60 because the counts driving it come from an
-already-truncated pull and are lower bounds. `pull_places.py` flags any query that
-comes back with 60 results, so a cell that still saturates is visible immediately
-and can be subdivided in a follow-up pull.
+**The ~30 threshold is the starting estimate, not the rule.** The actual stopping
+condition is **zero cells returning exactly 60 on any type** — a cap hit is direct
+evidence that a cell lost its tail, whereas an estimate drawn from an
+already-truncated pull inherits the very bias it is meant to correct. That is not
+theoretical: the cells the estimate judged *sparsest* capped hardest, 7 of 8 at the
+2263 m tier.
+
+So sizing is iterative. `pull_places.py` flags every query that returns 60 and warns
+at the end of a run; those cells are subdivided and re-pulled until none saturate.
+The most recent pull had **54 of 120 queries hit the ceiling**, so the current
+60-centre layout is round 1 and a round 2 is outstanding.
 
 Changing either setting means re-running `pull_places.py` (paid) and
 `build_networks.py` (free) — and the bbox governs data size, since node count
@@ -257,7 +286,7 @@ So snapping refuses to guess:
   which the app treats as unreachable. Four food stands inside La Ronde are the
   real case: the walk graph reaches them, the bike graph doesn't.
 - **50 m median ceiling.** The single cheapest signal that ids belong to a
-  different graph. Healthy values are ~16 m walk, ~24 m bike.
+  different graph. Healthy values are ~17 m walk, ~25 m bike.
 - **Startup check in the app.** `assertNodeIdsValid` in `viz/app.js` flags
   out-of-range ids in the console and in the status pill.
 
@@ -275,7 +304,8 @@ tight enough that the bug that shipped (a 6.3 km "10-minute walk", an implied
 38 km/h) trips it 80 times over. It runs in three places:
 
 - `check_crow_bound()` in `prep/snap.py` — the shared implementation
-- `--check` routes 5 sample pins × 2 cutoffs × both modes and asserts it
+- `--check` routes 8 sample pins × 2 cutoffs × both modes and asserts it,
+  including Verdun, Île-des-Sœurs and Westmount in the newest part of the graph
 - `assertCrowBound()` in `viz/app.js` — every render, in dev mode only
   (localhost, or any URL with `?debug=1`), logging violations to the console
 
@@ -295,8 +325,11 @@ so bad data cannot reach Pages.
 
 `pull_places.py` stamps `meta.generated` and `enrich_places.py` stamps
 `meta.enriched` in `places.json`. The sidebar shows "Data updated N days ago"
-from those, turning amber past 180 days, so a stale deploy is visible in the UI
-rather than something you have to go digging for.
+from those, turning amber past 30 days and reading "stale, due a refresh", so a
+stale deploy is visible in the UI rather than something you have to go digging
+for. The threshold is `STALE_AFTER_DAYS` in `viz/app.js`; it is a product
+decision about how fast restaurant data decays, not a compliance number — see
+[DATA.md](DATA.md).
 
 `meta.annotated` also gets written, by the snapping step — it records when node
 ids were last recomputed and is deliberately *not* used for the freshness badge,
@@ -306,6 +339,24 @@ Nothing updates on a schedule. `track_reviews.yml` is `workflow_dispatch` only �
 deliberately no cron, so the repo never spends API budget on its own.
 
 ---
+
+## Data, licensing, and refresh
+
+Place data comes from Google Places; the street network and basemap come from
+OpenStreetMap. They carry different obligations, and **[DATA.md](DATA.md) is the
+authoritative account** — what is Google-sourced versus OSM-sourced, what the
+attribution rules require, and which retention questions are settled versus open.
+
+Two things worth knowing before running anything:
+
+- **Refresh every ~30 days.** The sidebar badge turns amber and reads "stale, due a
+  refresh" past that. It is a product decision about how fast restaurant data
+  decays, not a compliance number — DATA.md explains why the distinction matters.
+- **The legacy endpoints this uses cannot be enabled in a new Cloud project.** They
+  remain fully supported for existing projects, with a 12-month turndown notice
+  commitment, but a fresh contributor cannot reproduce the pull. The banked raw
+  responses exist partly for this reason — `places.json` rebuilds from them for
+  free, with no API access at all.
 
 ## Local development
 
