@@ -18,9 +18,20 @@ const BASEMAPS = {
   "stadia-toner-lite":"https://tiles.stadiamaps.com/styles/stamen_toner_lite.json",
 };
 
-/* ── Speed constants — must match build_networks.py WALK/BIKE_SPEED_MPS ──── */
+/* ── Speed constants — must match prep/snap.py WALK/BIKE_SPEED_MPS ───────── */
 const WALK_MPS = 4800  / 3600;   // 4.8 km/h
 const BIKE_MPS = 15000 / 3600;   // 15.0 km/h
+
+/* Dev mode: on localhost, or any URL with ?debug=1. Enables the straight-line
+   reachability assertion below, which is O(results) per render and only useful
+   while developing. */
+const DEV = location.hostname === "localhost"
+         || location.hostname === "127.0.0.1"
+         || new URLSearchParams(location.search).has("debug");
+
+/* Multiplier on mode speed for the straight-line bound — mirrors
+   BOUND_SPEED_FACTOR in prep/snap.py. Keep the two in step. */
+const BOUND_SPEED_FACTOR = 2.0;
 
 /* ── Heating-up thresholds (tweak as needed) ────────────────────────────── */
 const HEAT_MIN_SHARE    = 0.5;   // >= half the review sample from last 6 months
@@ -302,8 +313,15 @@ function filterAndScore(distArr, cutoffSec, pinSnapSec) {
   const speedMps = state.mode === "walk" ? WALK_MPS      : BIKE_MPS;
 
   // Hard filters: reachability + price + category; compute total time including both snap legs
+  const nodeCount = distArr.length;
   let survivors = places.flatMap(p => {
-    const graphSec = distArr[p[nodeKey]];
+    // A null node means the place is not on this network (e.g. inside a park the
+    // bike graph does not enter). A non-integer or out-of-range id means the data
+    // is corrupt. Either way the place is unreachable — never fall back to node 0,
+    // which would report a travel time measured from someone else's doorstep.
+    const nodeId = p[nodeKey];
+    if (!Number.isInteger(nodeId) || nodeId < 0 || nodeId >= nodeCount) return [];
+    const graphSec = distArr[nodeId];
     if (!isFinite(graphSec)) return [];
     const placeSnapSec = (p[snapKey] ?? 0) / speedMps;
     const totalSec = graphSec + pinSnapSec + placeSnapSec;
@@ -337,7 +355,47 @@ function filterAndScore(distArr, cutoffSec, pinSnapSec) {
     p.score        = w * p.ratingScaled + (1 - w) * p.closeness;
   });
 
+  if (DEV) assertCrowBound(survivors, cutoffSec, speedMps);
+
   return survivors.sort((a, b) => b.score - a.score);
+}
+
+/* Straight-line reachability assertion (dev mode only).
+
+   A real route is never shorter than the straight line, so nothing reachable in
+   `cutoffSec` can be farther from the pin than cutoffSec x speed. This holds no
+   matter how the graph is stored, so unlike the node-id range check it survives
+   a change to the binary format, the CSR build, or Dijkstra itself.
+
+   Mirrors check_crow_bound() in prep/snap.py; `python prep/reannotate_places.py
+   --check` runs the same assertion over sample pins in CI. */
+function assertCrowBound(survivors, cutoffSec, speedMps) {
+  if (!state.pin) return;
+  const limitM = speedMps * BOUND_SPEED_FACTOR * cutoffSec;
+
+  const bad = [];
+  for (const p of survivors) {
+    const crow = haversineM(state.pin.lat, state.pin.lon, p.lat, p.lon);
+    if (crow > limitM) {
+      bad.push({
+        name: p.name,
+        crow_m: Math.round(crow),
+        limit_m: Math.round(limitM),
+        reported_min: +p.travelMin.toFixed(1),
+        implied_kmh: Math.round((crow / (p.travelMin * 60)) * 3.6),
+      });
+    }
+  }
+  if (!bad.length) return;
+
+  bad.sort((a, b) => b.crow_m - a.crow_m);
+  console.error(
+    `[mtl-food] ${bad.length} result(s) violate the straight-line bound ` +
+    `(${state.mode}, ${cutoffSec / 60} min, limit ${Math.round(limitM)} m). ` +
+    `Reported travel times are not physically possible:`,
+    bad.slice(0, 10)
+  );
+  return bad;
 }
 
 function hiddenGems(survivors) {
@@ -438,8 +496,10 @@ function renderLayers(scored) {
    RESULTS LIST
    ══════════════════════════════════════════════════════════════════════════ */
 
-/* Returns {day, hhmm} for the current moment in America/Toronto. */
-function torontoNow() {
+/* Returns {day, hhmm} for the current moment in Montreal.
+   The IANA zone is America/Toronto — Montreal shares it, there is no
+   America/Montreal zone in the tz database. */
+function montrealNow() {
   const parts = new Intl.DateTimeFormat("en", {
     timeZone: "America/Toronto",
     weekday: "short",
@@ -474,7 +534,7 @@ function checkHours(hours, day, hhmm) {
 /* Returns true (open), false (closed), or null (hours unknown). */
 function isOpenNow(hours) {
   if (!hours || !hours.length) return null;
-  const { day, hhmm } = torontoNow();
+  const { day, hhmm } = montrealNow();
   return checkHours(hours, day, hhmm);
 }
 
@@ -729,7 +789,47 @@ async function loadData() {
     `bike ${bikeData.meta.node_count} nodes / ${bikeData.meta.edge_count} edges`
   );
 
+  assertNodeIdsValid(walkData, bikeData);
+
   setStatus("idle", "Click the map to drop a pin");
+}
+
+/* Startup sanity check on the place → graph-node ids.
+
+   Every place's travel time is read straight out of the Dijkstra distance array
+   at its stored node id. If those ids were generated against a different build
+   of the .bin graphs, each place gets a plausible but wrong time and no cutoff
+   can filter it out — the failure is invisible. This catches it at load.
+
+   The prep-side equivalent is `python prep/reannotate_places.py --check`, which
+   also measures snap distances; here we can only check ranges cheaply, so a bad
+   median still needs the prep script. */
+function assertNodeIdsValid(walkData, bikeData) {
+  const counts = { walk: walkData.meta.node_count, bike: bikeData.meta.node_count };
+  const bad = { walk: 0, bike: 0 };
+  let offNetwork = 0;
+
+  for (const p of places) {
+    for (const mode of ["walk", "bike"]) {
+      const id = p[`${mode}_node`];
+      if (id === null || id === undefined) { offNetwork++; continue; }
+      if (!Number.isInteger(id) || id < 0 || id >= counts[mode]) bad[mode]++;
+    }
+  }
+
+  if (bad.walk || bad.bike) {
+    console.error(
+      `[mtl-food] ${bad.walk} walk and ${bad.bike} bike node ids are out of range. ` +
+      `places.json is out of sync with the .bin graphs — ` +
+      `run: python prep/reannotate_places.py --mark-unreachable`
+    );
+    setStatus("error", "Map data is out of sync — results may be wrong");
+    return false;
+  }
+  if (offNetwork) {
+    console.log(`[mtl-food] ${offNetwork} place/mode pair(s) marked off-network`);
+  }
+  return true;
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
