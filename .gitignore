@@ -6,3 +6,7 @@ prep/.venv/
 prep/venv/
 *.egg-info/
 .python-version
+
+# Raw API responses - large, and regenerable only by paying for them again.
+# See the note in README before deciding to commit this.
+prep/data/raw_responses.jsonl

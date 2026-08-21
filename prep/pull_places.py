@@ -20,7 +20,8 @@ import time
 from datetime import date
 from pathlib import Path
 
-from jsonio import preflight, read_json, write_json
+from jsonio import ensure_utf8_stdout, preflight, read_json, write_json
+from rawbank import RawBank
 
 import requests
 
@@ -36,16 +37,21 @@ OUT_PATH = Path(__file__).parent.parent / "viz" / "data" / "places.json"
 # Nearby Search returns at most 60 results per (centre, type) — 3 pages of 20 —
 # ranked by prominence. A centre covering more than 60 restaurants therefore
 # drops the least prominent ones silently, which is precisely the long tail the
-# "Hidden gems" view is built from. So cells are subdivided until no cell holds
-# more than ~30 known places of either type, leaving headroom under the ceiling.
+# "Hidden gems" view is built from.
 #
 # Produced by recursive quadtree subdivision: start at 3200 m squares, split any
 # square over the threshold, floor at 400 m. Radius is each square's half-diagonal,
 # so the circles cover their squares with no gaps. Empty squares are dropped,
 # which removes the river, Mount Royal, and the rail yards automatically.
 #
-# Counts in the comments are from the previous (truncated) pull, so they are
-# lower bounds. Re-run the subdivision against real counts after this pull.
+# SIZING CRITERION: subdivide until no query returns exactly 60, i.e. until no cell
+# hits the ceiling. The earlier criterion — keep estimated counts under ~30 — was
+# derived from an already-truncated pull, so it inherited the very bias it was
+# meant to correct, and the cells it judged sparse turned out to cap the hardest.
+# Cap hits are direct evidence and carry no such bias.
+#
+# The counts in the comments below are from that truncated pull and are lower
+# bounds only. This layout is round 1; re-run the subdivision against cap hits.
 #
 #   (lat, lon, radius_m)
 SEARCH_CENTERS = [
@@ -140,7 +146,15 @@ CHECKPOINT_EVERY = 5   # centres between atomic saves
 DELAY_S = 2.1   # API requires >2 s between page_token requests
 
 
-def fetch_nearby(lat: float, lon: float, radius_m: int, place_type: str) -> "list[dict]":
+def fetch_nearby(lat: float, lon: float, radius_m: int, place_type: str,
+                 bank: "RawBank | None" = None) -> "list[dict]":
+    """
+    Fetch one (centre, type) query, up to 3 pages.
+
+    Every response is banked verbatim before anything parses it, so the paid
+    bytes survive any later failure and places.json can be rebuilt offline.
+    """
+    centre = (lat, lon, radius_m)
     params = {
         "key": API_KEY,
         "location": f"{lat},{lon}",
@@ -153,6 +167,11 @@ def fetch_nearby(lat: float, lon: float, radius_m: int, place_type: str) -> "lis
         resp = requests.get(NEARBY_URL, params=params, timeout=10)
         resp.raise_for_status()
         data = resp.json()
+
+        # Bank first. Parsing comes after; if it throws, the bytes are already safe.
+        if bank is not None:
+            bank.record_response(centre, place_type, page, data)
+
         status = data.get("status")
         if status not in ("OK", "ZERO_RESULTS"):
             print(f"  API status: {status}")
@@ -164,6 +183,10 @@ def fetch_nearby(lat: float, lon: float, radius_m: int, place_type: str) -> "lis
         time.sleep(DELAY_S)
         params = {"key": API_KEY, "pagetoken": token}
         page += 1
+
+    # Only now is the query complete; a partial query must be re-fetched on resume.
+    if bank is not None:
+        bank.record_query_complete(centre, place_type, page + 1, len(results))
     return results
 
 
@@ -201,6 +224,35 @@ def extract(raw: dict) -> "dict | None":
     }
 
 
+def _key(centre, place_type):
+    """Resume key for a (centre, type) query. Must match rawbank._key."""
+    lat, lon, radius = centre
+    return (round(lat, 5), round(lon, 5), int(radius), place_type)
+
+
+def _rebuild_from_bank(bank) -> "tuple[list, dict]":
+    """
+    Rebuild places.json from banked raw responses. Pure local transform, no API.
+
+    This is the only path that writes places.json, so a run that fetches nothing
+    new produces exactly the same output as one that fetched everything — and
+    changing how places are parsed or filtered costs nothing to re-apply.
+    """
+    seen = {}
+    n_resp = 0
+    for rec in bank.responses():
+        n_resp += 1
+        for raw in rec.get("response", {}).get("results", []):
+            p = extract(raw)
+            if p and p["id"] not in seen:
+                seen[p["id"]] = p
+
+    payload = _build_payload(seen)
+    write_json(OUT_PATH, payload)
+    print(f"  rebuilt from {n_resp} banked responses -> {len(seen)} unique places")
+    return list(seen.values()), payload
+
+
 def _build_payload(seen: dict) -> dict:
     """Assemble the places.json payload from whatever has been gathered so far."""
     places = list(seen.values())
@@ -222,12 +274,37 @@ def _build_payload(seen: dict) -> dict:
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--yes", action="store_true", help="Skip confirmation prompt")
+    parser.add_argument("--force", action="store_true",
+                        help="Re-fetch every centre, ignoring what is already banked")
     args = parser.parse_args()
 
-    max_calls = len(SEARCH_CENTERS) * len(PLACE_TYPES) * 3   # 3 pages max
+    ensure_utf8_stdout()
+    bank = RawBank()
+
+    # Resume: anything already banked has been paid for once and is not re-fetched.
+    done = set() if args.force else bank.completed()
+    todo_queries = [(c, t) for c in SEARCH_CENTERS for t in PLACE_TYPES
+                    if args.force or _key(c, t) not in done]
+    skipped = len(SEARCH_CENTERS) * len(PLACE_TYPES) - len(todo_queries)
+
+    max_calls = len(todo_queries) * 3   # 3 pages max per query
     est = max_calls * 0.032
+    st = bank.stats()
     print(f"Centres: {len(SEARCH_CENTERS)}  ({len(PLACE_TYPES)} types x 3 pages each)")
-    print(f"Estimated cost: up to ~${est:.2f}  ({max_calls} calls max x $0.032 Nearby Search)")
+    if st["responses"]:
+        print(f"Already banked : {st['queries_complete']} complete queries, "
+              f"{st['responses']} responses, {st['bytes']/1024:.0f} KB")
+    if args.force and skipped == 0 and st["queries_complete"]:
+        print(f"--force: re-fetching all {st['queries_complete']} banked queries")
+    print(f"Will skip      : {skipped} query(ies) already banked  (cost $0.00)")
+    print(f"Will fetch     : {len(todo_queries)} query(ies)")
+    print(f"Estimated cost : up to ~${est:.2f}  ({max_calls} calls max x $0.032 Nearby Search)")
+
+    if not todo_queries:
+        print("\nNothing to fetch. Rebuilding places.json from the bank (free) ...")
+        _rebuild_from_bank(bank)
+        return
+
     if not args.yes:
         answer = input("Proceed? [y/N] ").strip().lower()
         if answer != "y":
@@ -243,40 +320,24 @@ def main():
         sys.exit(f"Pre-flight write test failed, refusing to spend: {exc}")
     print("Pre-flight write test: OK")
 
-    seen = {}  # type: dict[str, dict]
     total_requests = 0
-
     capped = 0
-    for i, (lat, lon, radius_m) in enumerate(SEARCH_CENTERS):
-        for ptype in PLACE_TYPES:
-            print(f"[{i+1}/{len(SEARCH_CENTERS)}] ({lat:.4f},{lon:.4f}) r={radius_m}m "
+    with bank:
+        for n, ((lat, lon, radius_m), ptype) in enumerate(todo_queries, 1):
+            print(f"[{n}/{len(todo_queries)}] ({lat:.4f},{lon:.4f}) r={radius_m}m "
                   f"type={ptype} …", flush=True)
-            raws = fetch_nearby(lat, lon, radius_m, ptype)
+            raws = fetch_nearby(lat, lon, radius_m, ptype, bank=bank)
             total_requests += 1
-            for r in raws:
-                p = extract(r)
-                if p and p["id"] not in seen:
-                    seen[p["id"]] = p
-            # 60 means the API ceiling was hit and the long tail was dropped;
-            # that cell needs subdividing before the data can be trusted.
             hit_cap = len(raws) >= 60
             capped += hit_cap
-            print(f"  +{len(raws)} results, {len(seen)} unique so far"
+            print(f"  +{len(raws)} results"
                   + ("   << HIT 60 CAP - subdivide this cell" if hit_cap else ""))
             time.sleep(0.3)
 
-        # Checkpoint. Writes are atomic, so an interrupted run leaves the last
-        # good checkpoint rather than a truncated file, and costs at most the
-        # calls made since it.
-        if (i + 1) % CHECKPOINT_EVERY == 0:
-            write_json(OUT_PATH, _build_payload(seen))
-            print(f"  … checkpointed {len(seen)} places at centre {i+1}", flush=True)
-
-    places = list(seen.values())
-    payload = _build_payload(seen)
+    # places.json is a pure local transform over the bank, so build it from there
+    # rather than from whatever this run happened to hold in memory.
+    places, payload = _rebuild_from_bank(bank)
     mean_rating = payload["meta"]["mean_rating"]
-
-    write_json(OUT_PATH, payload)
     print(f"\nWrote {len(places)} places → {OUT_PATH}")
     print(f"Mean rating: {mean_rating}")
 
