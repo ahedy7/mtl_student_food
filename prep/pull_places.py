@@ -345,6 +345,20 @@ def main():
     # so we snapshot them here at no extra cost.
     _snapshot_review_history(places, OUT_PATH.parent)
 
+    if capped:
+        print(f"\nWARNING: {capped} (centre, type) query(ies) hit the 60-result ceiling. "
+              f"Those cells lost their long tail — re-run the subdivision and pull again.")
+
+    # The bank is the only artefact here that cost money and cannot be rebuilt
+    # locally. It is gitignored deliberately (raw Google content, and an
+    # append-only file is a poor fit for git), so back it up out of band.
+    st = bank.stats()
+    print(f"\nRaw response bank: {bank.path}")
+    print(f"  {st['responses']} responses, {st['queries_complete']} complete queries, "
+          f"{st['bytes']/1024/1024:.1f} MB")
+    print(f"  NOT in git. Copy it somewhere durable now — re-fetching costs money, "
+          f"rebuilding from it is free. See 'Backing up the raw bank' in README.md.")
+
 
 def _snapshot_review_history(places: list, data_dir: Path) -> None:
     """Append today's review counts to review_history.json (no API calls)."""

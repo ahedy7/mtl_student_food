@@ -70,6 +70,35 @@ fewer, wider ones.
 Cost: `centres × 2 types × 3 pages × $0.032`. With the current 14 centres that is
 84 calls ≈ **$2.69**. The script prints the estimate and waits for confirmation.
 
+### Backing up the raw bank
+
+Every API response is appended verbatim to `prep/data/raw_responses.jsonl` before
+anything parses it. That file is the only artefact in this project that cost money
+and cannot be regenerated locally — `places.json` is a pure transform over it, so
+re-parsing is free, but re-fetching is not.
+
+**It is gitignored on purpose**, for two reasons: it holds raw Google Places
+content, which is subject to caching and redistribution restrictions and this repo
+is public; and an append-only file that grows with every pull is a poor fit for git
+history. So it needs an out-of-band copy.
+
+After every pull:
+
+```bash
+# the pull prints the path and size; copy it somewhere durable
+cp prep/data/raw_responses.jsonl ~/backups/mtl_food/raw_responses_$(date +%Y%m%d).jsonl
+```
+
+To rebuild `places.json` from a restored bank — free, no network, no key needed
+beyond the env check:
+
+```bash
+python prep/pull_places.py        # skips every banked query, rebuilds and exits
+```
+
+A run with nothing left to fetch reports `Will fetch: 0` and goes straight to the
+rebuild. `--force` re-fetches everything and costs full price.
+
 ### 2. `build_networks.py` — street graphs [free]
 
 Downloads walk and bike networks from OSM via `osmnx`, writes binary typed-array
