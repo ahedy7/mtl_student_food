@@ -15,7 +15,23 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Gate: refuse to publish data that would give users wrong travel times.
+  # Stdlib only, no network, no API spend — runs in about a second.
+  verify-data:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Verify place node ids and travel-time sanity
+        run: python prep/reannotate_places.py --check
+
   deploy:
+    needs: verify-data
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
