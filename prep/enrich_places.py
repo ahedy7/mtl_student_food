@@ -34,6 +34,15 @@ SIX_MONTHS_S  = 6 * 30 * 24 * 3600
 DELAY_S       = 0.06
 SAVE_EVERY    = 50
 
+# Hidden-gems definition, mirroring hiddenGems() in viz/app.js: rating at or above
+# GEM_MIN_RATING, review count in the bottom GEM_PERCENTILE of the set.
+#
+# app.js computes that percentile over the *survivors* of one query, so the cut
+# moves with the pin. Here we can only approximate it corpus-wide, which is close
+# enough to decide what to spend Details calls on.
+GEM_MIN_RATING = 4.3
+GEM_PERCENTILE = 25
+
 
 def fetch_details(place_id: str, api_key: str) -> dict:
     resp = requests.get(DETAILS_URL, params={
@@ -77,6 +86,47 @@ def fetch_details(place_id: str, api_key: str) -> dict:
     return {"hours": hours, "recent_share": recent_share, "review_sample": review_sample}
 
 
+def gem_review_ceiling(places: list, percentile: int = GEM_PERCENTILE) -> int:
+    """Review count at the given percentile across the corpus."""
+    counts = sorted(p.get("reviews", 0) for p in places)
+    if not counts:
+        return 0
+    return counts[min(len(counts) - 1, int(len(counts) * percentile / 100))]
+
+
+def is_gem_candidate(p: dict, ceiling: int) -> bool:
+    return p.get("rating", 0) >= GEM_MIN_RATING and p.get("reviews", 0) <= ceiling
+
+
+def prioritise(todo: list, places: list) -> "tuple[list, dict]":
+    """
+    Order the enrichment queue: hidden-gems candidates first, then the rest by
+    review count.
+
+    Ordering by review count alone — the previous behaviour — is the exact inverse
+    of what the Hidden gems view needs. Gems are by definition in the bottom
+    quartile of review counts, so a review-count-ordered queue reaches them last
+    and a --limit cut removes them entirely. That leaves the one view built around
+    obscure places as the one view with no opening hours, which also means the
+    "Open now" filter silently drops them.
+
+    Within each tier, most-reviewed first, so the places most likely to be seen
+    are still enriched before the ones that rarely surface.
+    """
+    ceiling = gem_review_ceiling(places)
+    gems  = [p for p in todo if is_gem_candidate(p, ceiling)]
+    other = [p for p in todo if not is_gem_candidate(p, ceiling)]
+    gems.sort(key=lambda p: p.get("reviews", 0), reverse=True)
+    other.sort(key=lambda p: p.get("reviews", 0), reverse=True)
+
+    all_gems = [p for p in places if is_gem_candidate(p, ceiling)]
+    return gems + other, {
+        "ceiling": ceiling,
+        "gems_in_corpus": len(all_gems),
+        "gems_pending": len(gems),
+    }
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--limit", type=int, default=200,
@@ -92,18 +142,29 @@ def main():
     raw    = json.loads(PLACES_PATH.read_text())
     places = raw["places"]
 
-    # Skip places that already have both fields; sort remainder by reviews desc
-    todo = sorted(
-        [p for p in places if "hours" not in p or "recent_share" not in p],
-        key=lambda p: p.get("reviews", 0),
-        reverse=True,
-    )
-    todo = todo[: args.limit]
+    # Skip places that already have both fields; hidden-gems candidates first
+    pending = [p for p in places if "hours" not in p or "recent_share" not in p]
+    ordered, gem_stats = prioritise(pending, places)
+    todo = ordered[: args.limit]
 
-    already = len(places) - len([p for p in places if "hours" not in p or "recent_share" not in p])
+    already = len(places) - len(pending)
     est     = len(todo) * COST_PER_CALL
+    gems_covered = sum(1 for p in todo
+                       if is_gem_candidate(p, gem_stats["ceiling"]))
+
     print(f"Places to enrich : {len(todo)}  ({already} already done, {len(places)} total)")
-    print(f"Estimated cost   : ~${est:.2f}  ({len(todo)} calls × ${COST_PER_CALL})")
+    print(f"Estimated cost   : ~${est:.2f}  ({len(todo)} calls x ${COST_PER_CALL})")
+    print(f"Hidden-gems candidates : rating >= {GEM_MIN_RATING}, "
+          f"reviews <= {gem_stats['ceiling']} (p{GEM_PERCENTILE} of corpus)")
+    print(f"  in corpus  : {gem_stats['gems_in_corpus']}")
+    print(f"  pending    : {gem_stats['gems_pending']}")
+    if gem_stats["gems_pending"]:
+        pct = gems_covered / gem_stats["gems_pending"] * 100
+        print(f"  covered by this run : {gems_covered} / {gem_stats['gems_pending']}  ({pct:.0f}%)")
+        if gems_covered < gem_stats["gems_pending"]:
+            need = gem_stats["gems_pending"] - gems_covered
+            print(f"  {need} gem candidate(s) left unenriched - "
+                  f"another ~${need * COST_PER_CALL:.2f} to finish them")
 
     if args.dry_run:
         print("[dry-run] No API calls made.")
