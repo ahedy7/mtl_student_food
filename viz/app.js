@@ -790,6 +790,7 @@ async function loadData() {
   );
 
   assertNodeIdsValid(walkData, bikeData);
+  renderDataAge(placesData.meta);
 
   setStatus("idle", "Click the map to drop a pin");
 }
@@ -830,6 +831,32 @@ function assertNodeIdsValid(walkData, bikeData) {
     console.log(`[mtl-food] ${offNetwork} place/mode pair(s) marked off-network`);
   }
   return true;
+}
+
+/* Show when the underlying data was pulled, so a stale deploy is visible. */
+function renderDataAge(meta = {}) {
+  const el = document.getElementById("data-age");
+  if (!el) return;
+
+  // Only pull dates count as freshness. meta.annotated is when node ids were
+  // last re-snapped, which says nothing about how old the place data is.
+  const stamp = meta.enriched || meta.generated;
+  if (!stamp) { el.hidden = true; return; }
+
+  const then = new Date(`${stamp}T00:00:00`);
+  if (isNaN(then)) { el.hidden = true; return; }
+
+  const days = Math.floor((Date.now() - then) / 86_400_000);
+  const rel = days <= 0 ? "today"
+            : days === 1 ? "yesterday"
+            : days < 30  ? `${days} days ago`
+            : days < 365 ? `${Math.floor(days / 30)} mo ago`
+            : `${Math.floor(days / 365)} yr ago`;
+
+  el.hidden = false;
+  el.textContent = `Data updated ${rel}`;
+  el.title = `Places last pulled ${stamp}`;
+  el.classList.toggle("stale", days > 180);
 }
 
 /* ══════════════════════════════════════════════════════════════════════════

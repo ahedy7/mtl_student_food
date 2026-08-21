@@ -22,6 +22,7 @@ import json
 import os
 import sys
 import time
+from datetime import date
 from pathlib import Path
 
 import requests
@@ -132,6 +133,8 @@ def main():
 
         time.sleep(DELAY_S)
 
+    # Surfaced in the UI as "Data updated N days ago" (renderDataAge in viz/app.js).
+    raw.setdefault("meta", {})["enriched"] = date.today().isoformat()
     PLACES_PATH.write_text(json.dumps(raw, ensure_ascii=False, separators=(",", ":")))
     print(f"\nDone. {fetched} enriched, {errors} errors. Actual cost ~${fetched * COST_PER_CALL:.2f}")
 

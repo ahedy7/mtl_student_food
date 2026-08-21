@@ -148,6 +148,9 @@ def main():
         "meta": {
             "mean_rating": mean_rating,
             "count": len(places),
+            # Surfaced in the UI as "Data updated N days ago" (see renderDataAge
+            # in viz/app.js), so a stale deploy is visible without digging.
+            "generated": date.today().isoformat(),
             "note": "walk_node and bike_node are filled by build_networks.py",
         },
         "places": places,
