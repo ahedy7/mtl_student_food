@@ -120,7 +120,34 @@
         <button id="btn-help" title="How it works">?</button>
       </footer>
 
-      <div id="data-age" class="data-age" hidden></div>
+      <!-- Attribution for Google Places content.
+
+           Google's Places policy requires the Google Maps logo when Places data is
+           shown without a Google map, and explicitly permits the text "Google Maps"
+           where space is limited — which this footer is. The text must stay
+           unmodified and unlocalized.
+
+           It also requires the attribution to sit in its own visual container,
+           distinguished from other content, rather than appended to another credit
+           line. Hence .attribution rather than a line in the footer.
+
+           TODO: swap the text mark for the official logo asset. Drop the file in
+           viz/ and replace the one line marked GM-MARK below with an <img>; the
+           16-19dp height and clear-space rules are already applied in style.css
+           (.attribution-mark). Nothing else needs to change. -->
+      <section class="attribution" aria-label="Data sources">
+        <div class="attribution-row">
+          <span class="attribution-label">Place data</span>
+          <!-- GM-MARK: replace this span with the official logo <img> when available -->
+          <span class="attribution-mark">Google Maps</span>
+        </div>
+        <div class="attribution-row">
+          <span class="attribution-label">Map &amp; routing</span>
+          <span class="attribution-src">OpenStreetMap contributors, OpenFreeMap</span>
+        </div>
+        <div id="attribution-extra" class="attribution-extra" hidden></div>
+        <div id="data-age" class="data-age" hidden></div>
+      </section>
     </aside>
 
     <!-- ── Welcome modal ────────────────────────────────── -->

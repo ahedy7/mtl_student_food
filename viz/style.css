@@ -594,9 +594,63 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
   border-top: 1px solid var(--border);
 }
 
+/* ── Attribution ─────────────────────────────────────────────────────────────
+   Google's Places policy requires attribution to sit in its own visual container,
+   distinguished from surrounding content by border, background, shadow or
+   whitespace — not appended to another credit line. This block provides that
+   with a top border and its own background, matching the sidebar's surface
+   palette so it reads as part of the design rather than a bolted-on notice. */
+.attribution {
+  padding: 10px 16px 12px;
+  border-top: 1px solid var(--border);
+  background: var(--surface2);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.attribution-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 10px;
+  line-height: 1.5;
+}
+.attribution-label {
+  color: var(--text-muted);
+  opacity: 0.75;
+  min-width: 68px;
+}
+.attribution-src { color: var(--text-muted); }
+
+/* The Google Maps mark. Height and clear space follow the policy's 16-19dp /
+   10dp-sides / 5dp-bottom rules, so swapping the text for the official logo
+   asset needs no further CSS. */
+.attribution-mark {
+  display: inline-flex;
+  align-items: center;
+  min-height: 16px;
+  max-height: 19px;
+  margin: 0 10px 5px 0;
+  color: var(--text);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+.attribution-mark img { height: 17px; width: auto; display: block; }
+
+/* Verbatim html_attributions returned by the API, when present. */
+.attribution-extra {
+  margin-top: 2px;
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 1.5;
+}
+.attribution-extra a { color: var(--accent-dim); }
+.attribution-extra[hidden] { display: none; }
+
 /* ── Data freshness stamp ────────────────────────────────────────────────── */
 .data-age {
-  padding: 0 16px 10px;
+  margin-top: 4px;
   color: var(--text-muted);
   font-size: 10px;
   letter-spacing: 0.02em;
@@ -604,6 +658,16 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
 }
 .data-age.stale { color: var(--gold); }
 .data-age[hidden] { display: none; }
+
+/* Attributions shown on an individual result card. */
+.result-attribution {
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-size: 9px;
+  line-height: 1.4;
+  opacity: 0.85;
+}
+.result-attribution a { color: var(--accent-dim); }
 #basemap-select {
   flex: 1;
   padding: 9px 8px;

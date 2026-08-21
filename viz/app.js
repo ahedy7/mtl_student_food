@@ -215,21 +215,44 @@ function buildNodeGrid(nodeFlat) {
   return grid;
 }
 
+/* Snap a pin to the nearest graph node, searching outward a ring at a time.
+
+   Returns -1 when there is no node within MAX_PIN_SNAP_RINGS — a pin in the
+   river, outside the bbox, or on a landmass the graph does not cover (the walk
+   graph does not include Ile-des-Soeurs). It must NOT fall back to node 0: that
+   silently routes from an arbitrary node and produces plausible, entirely false
+   travel times, which is the same failure that shipped once via stale place node
+   ids. Callers must handle -1. */
+const MAX_PIN_SNAP_RINGS = 3;
+/* Same 500 m ceiling prep/snap.py applies to places. Beyond it the "nearest" node
+   is somewhere you cannot actually walk to — across the river, say — and routing
+   from it would report times for a journey the user cannot make. */
+const MAX_PIN_SNAP_M = 500;
+
 function nearestNodeGrid(grid, nodeFlat, lat, lon) {
   const br = Math.floor(lat / GRID_DEG), bc = Math.floor(lon / GRID_DEG);
-  let bestD = Infinity, bestI = 0;
-  for (let dr = -1; dr <= 1; dr++) {
-    for (let dc = -1; dc <= 1; dc++) {
-      const cell = grid.get(`${br+dr},${bc+dc}`);
-      if (!cell) continue;
-      for (const i of cell) {
-        const dlat = nodeFlat[i*2]-lat, dlon = nodeFlat[i*2+1]-lon;
-        const d = dlat*dlat + dlon*dlon;
-        if (d < bestD) { bestD = d; bestI = i; }
+  let bestD = Infinity, bestI = -1;
+
+  for (let ring = 0; ring <= MAX_PIN_SNAP_RINGS; ring++) {
+    for (let dr = -ring; dr <= ring; dr++) {
+      for (let dc = -ring; dc <= ring; dc++) {
+        // Only the perimeter of this ring; inner cells were done already.
+        if (ring > 0 && Math.abs(dr) !== ring && Math.abs(dc) !== ring) continue;
+        const cell = grid.get(`${br+dr},${bc+dc}`);
+        if (!cell) continue;
+        for (const i of cell) {
+          const dlat = nodeFlat[i*2]-lat, dlon = nodeFlat[i*2+1]-lon;
+          const d = dlat*dlat + dlon*dlon;
+          if (d < bestD) { bestD = d; bestI = i; }
+        }
       }
     }
+    // Nothing in an outer ring can beat a hit already inside this one.
+    if (bestI >= 0 && bestD <= (ring * GRID_DEG) ** 2) break;
   }
-  return bestI;
+  if (bestI < 0) return -1;
+  const snapM = haversineM(lat, lon, nodeFlat[bestI*2], nodeFlat[bestI*2+1]);
+  return snapM <= MAX_PIN_SNAP_M ? bestI : -1;
 }
 
 function haversineM(lat1, lon1, lat2, lon2) {
@@ -613,6 +636,10 @@ function renderList(scored) {
     const openBadge  = openStatus === true  ? `<span class="open-badge open">Open</span>`
                      : openStatus === false ? `<span class="open-badge closed">Closed</span>`
                      : `<span class="open-badge unknown">Hours unknown</span>`;
+    // Verbatim, per the same policy as renderMetaAttributions above.
+    const attribution = Array.isArray(p.attributions) && p.attributions.length
+      ? `<div class="result-attribution">${p.attributions.join(" ")}</div>`
+      : "";
     const heat = isHeatingUp(p);
     const heatBadge = heat ? `<span class="heat-badge">${heat === "provisional" ? "heating up (provisional)" : "heating up"}</span>` : "";
 
@@ -635,6 +662,7 @@ function renderList(scored) {
           ? `<div class="result-score-bar"><div class="result-score-fill" style="width:${pct}%"></div></div>
              <div class="score-breakdown">★ ${rPct}%&ensp;·&ensp;📍 ${cPct}%</div>`
           : ""}
+        ${attribution}
       </div>
     </div>`;
   }).join("");
@@ -702,6 +730,18 @@ function render() {
   const t_nn = performance.now();
   const startNode  = nearestNodeGrid(gridLists[state.mode], graph.nodeFlat, state.pin.lat, state.pin.lon);
   console.log(`nearest-node: ${(performance.now()-t_nn).toFixed(2)} ms`);
+
+  // No node within reach: the pin is off the network entirely. Say so, rather
+  // than routing from an arbitrary node and inventing travel times.
+  if (startNode < 0) {
+    lastDistArr = null;
+    lastGraph   = null;
+    renderLayers([]);
+    renderList([]);
+    setStatus("error",
+      `No ${state.mode === "walk" ? "walking" : "cycling"} network here — try a pin on a street`);
+    return;
+  }
   const cutoffSec  = state.cutoff * 60;
   const speedMps   = state.mode === "walk" ? WALK_MPS : BIKE_MPS;
   const pinSnapSec = haversineM(state.pin.lat, state.pin.lon,
@@ -791,6 +831,7 @@ async function loadData() {
 
   assertNodeIdsValid(walkData, bikeData);
   renderDataAge(placesData.meta);
+  renderMetaAttributions(placesData.meta);
 
   setStatus("idle", "Click the map to drop a pin");
 }
@@ -833,6 +874,23 @@ function assertNodeIdsValid(walkData, bikeData) {
   return true;
 }
 
+/* Render response-level html_attributions returned by the Places API.
+
+   Google requires these to be displayed verbatim, including their links, so the
+   markup is inserted as-is rather than escaped. That is deliberate, and it is the
+   one place in this app where unescaped HTML is written to the DOM: the strings
+   come from the API response, are stored untouched in places.json, and the policy
+   leaves no room to sanitise them. If places.json is ever built from a source
+   other than the Google API, revisit this. */
+function renderMetaAttributions(meta = {}) {
+  const el = document.getElementById("attribution-extra");
+  if (!el) return;
+  const list = Array.isArray(meta.attributions) ? meta.attributions : [];
+  if (!list.length) { el.hidden = true; el.innerHTML = ""; return; }
+  el.hidden = false;
+  el.innerHTML = list.join(" ");
+}
+
 /* Show when the underlying data was pulled, so a stale deploy is visible. */
 function renderDataAge(meta = {}) {
   const el = document.getElementById("data-age");
@@ -847,16 +905,29 @@ function renderDataAge(meta = {}) {
   if (isNaN(then)) { el.hidden = true; return; }
 
   const days = Math.floor((Date.now() - then) / 86_400_000);
+  // STALE_AFTER_DAYS is a product decision, not a compliance requirement: place
+  // data drifts (closures, hours, ratings) and a month is about how long this
+  // corpus stays trustworthy. Google's caching terms do constrain how long Places
+  // content may be retained, but a general retention window could not be verified
+  // from the published policy, so this number is ours and should not be cited as
+  // theirs. See DATA.md.
+  const STALE_AFTER_DAYS = 30;
   const rel = days <= 0 ? "today"
             : days === 1 ? "yesterday"
             : days < 30  ? `${days} days ago`
             : days < 365 ? `${Math.floor(days / 30)} mo ago`
             : `${Math.floor(days / 365)} yr ago`;
 
+  const stale = days > STALE_AFTER_DAYS;
   el.hidden = false;
-  el.textContent = `Data updated ${rel}`;
-  el.title = `Places last pulled ${stamp}`;
-  el.classList.toggle("stale", days > 180);
+  el.textContent = stale
+    ? `Data ${rel} — stale, due a refresh`
+    : `Data updated ${rel}`;
+  el.title = stale
+    ? `Places last pulled ${stamp}. Older than ${STALE_AFTER_DAYS} days, so ratings, `
+      + `hours and closures may be out of date. Re-run the pipeline (see README).`
+    : `Places last pulled ${stamp}`;
+  el.classList.toggle("stale", stale);
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
