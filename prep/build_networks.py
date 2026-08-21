@@ -18,11 +18,14 @@ Usage:
     python prep/build_networks.py --convert # convert existing *_graph.json → binary
 """
 
+import argparse
 import array
 import json
-import math
 import sys
+from datetime import date
 from pathlib import Path
+
+from snap import SnapError, annotate_places as snap_annotate_places
 
 try:
     import networkx as nx
@@ -51,26 +54,6 @@ PLACES_PATH = DATA_DIR / "places.json"
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
-
-def haversine(lat1, lon1, lat2, lon2) -> float:
-    """Straight-line distance in metres."""
-    R = 6_371_000
-    φ1, φ2 = math.radians(lat1), math.radians(lat2)
-    dφ = math.radians(lat2 - lat1)
-    dλ = math.radians(lon2 - lon1)
-    a = math.sin(dφ/2)**2 + math.cos(φ1)*math.cos(φ2)*math.sin(dλ/2)**2
-    return 2 * R * math.asin(math.sqrt(a))
-
-
-def nearest_node_idx(nodes_latlon: list, lat: float, lon: float) -> int:
-    """Return index of the closest node (squared-degree approximation, O(n))."""
-    best_d, best_i = float("inf"), 0
-    for i, (nlat, nlon) in enumerate(nodes_latlon):
-        d = (nlat - lat)**2 + (nlon - lon)**2
-        if d < best_d:
-            best_d, best_i = d, i
-    return best_i
-
 
 def graph_to_binary(G: nx.MultiDiGraph, speed_mps: float) -> tuple:
     """
@@ -225,30 +208,47 @@ def convert_json_to_binary():
     return results
 
 
-def annotate_places(walk_nodes: list, bike_nodes: list):
+def annotate_places(walk_nodes: list, bike_nodes: list, mark_unreachable: bool = False):
+    """
+    Re-snap every place to the graphs that were just written.
+
+    This MUST run whenever the .bin files change. If the node ids in places.json
+    are left pointing at a previous graph's node ordering, every place keeps a
+    plausible-looking but wrong travel time, and no cutoff in the app can filter
+    it out. snap.annotate_places refuses to write when that has happened.
+    """
     if not PLACES_PATH.exists():
         print("\nplaces.json not found – skipping node annotation.")
         print("Run pull_places.py first, then re-run build_networks.py.")
         return
 
-    data = json.loads(PLACES_PATH.read_text())
+    data = json.loads(PLACES_PATH.read_text(encoding="utf-8"))
     places = data["places"]
     print(f"\nAnnotating {len(places)} places with nearest graph nodes …")
 
-    for p in places:
-        lat, lon = p["lat"], p["lon"]
-        wi = nearest_node_idx(walk_nodes, lat, lon)
-        bi = nearest_node_idx(bike_nodes, lat, lon)
-        p["walk_node"]   = wi
-        p["bike_node"]   = bi
-        p["walk_snap_m"] = round(haversine(lat, lon, walk_nodes[wi][0], walk_nodes[wi][1]))
-        p["bike_snap_m"] = round(haversine(lat, lon, bike_nodes[bi][0], bike_nodes[bi][1]))
+    try:
+        stats = snap_annotate_places(places, walk_nodes, bike_nodes,
+                                     mark_unreachable=mark_unreachable)
+    except SnapError as exc:
+        sys.exit(f"\nERROR: {exc}")
 
-    PLACES_PATH.write_text(json.dumps(data, ensure_ascii=False, separators=(",", ":")))
+    for mode in ("walk", "bike"):
+        st = stats[mode]
+        print(f"  {mode}: median snap {st['median_m']:.0f} m, "
+              f"max {st['max_m']:.0f} m, {st['over_100m']} place(s) over 100 m")
+    for u in stats["unreachable"]:
+        shown = "no node in range" if u["snap_m"] is None else f"{u['snap_m']} m away"
+        print(f"  marked unreachable by {u['mode']}: {u['name']}  ({shown})")
+
+    data.setdefault("meta", {})["annotated"] = date.today().isoformat()
+    PLACES_PATH.write_text(
+        json.dumps(data, ensure_ascii=False, separators=(",", ":")),
+        encoding="utf-8",
+    )
     print(f"Updated {PLACES_PATH}")
 
 
-def main():
+def main(mark_unreachable: bool = False):
     if not _OSM_AVAILABLE:
         print("ERROR: osmnx / networkx not installed. Cannot download from OSM.")
         print("Install with: pip install osmnx networkx")
@@ -257,14 +257,30 @@ def main():
 
     walk_nodes = download_and_export("walk", WALK_SPEED_MPS, "walk")
     bike_nodes = download_and_export("bike", BIKE_SPEED_MPS, "bike")
-    annotate_places(walk_nodes, bike_nodes)
+    annotate_places(walk_nodes, bike_nodes, mark_unreachable)
     print("\nDone. Commit viz/data/ and push to deploy.")
 
 
 if __name__ == "__main__":
-    if "--convert" in sys.argv:
+    parser = argparse.ArgumentParser(description="Build walk/bike networks for the viz.")
+    parser.add_argument("--convert", action="store_true",
+                        help="Convert existing *_graph.json to binary instead of downloading")
+    parser.add_argument("--mark-unreachable", action="store_true",
+                        help="Record places farther than 500 m from a network as "
+                             "unreachable for that mode (null node) instead of failing")
+    args = parser.parse_args()
+
+    if args.convert:
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         results = convert_json_to_binary()
         print("\nConversion complete. Binary files written to viz/data/.")
+        # Writing new .bin files invalidates every node id in places.json, so
+        # re-annotation is part of the conversion, not an optional follow-up.
+        if "walk" in results and "bike" in results:
+            annotate_places(results["walk"], results["bike"], args.mark_unreachable)
+        else:
+            print("\nWARNING: only some graphs were converted, so places.json was NOT "
+                  "re-annotated. Its node ids may point at a stale node ordering - "
+                  "run prep/reannotate_places.py before deploying.")
     else:
-        main()
+        main(args.mark_unreachable)
