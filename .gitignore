@@ -10,3 +10,6 @@ prep/venv/
 # Raw API responses - large, and regenerable only by paying for them again.
 # See the note in README before deciding to commit this.
 prep/data/raw_responses.jsonl
+
+# osmnx Overpass response cache, created by build_networks.py (86 MB, regenerable)
+cache/

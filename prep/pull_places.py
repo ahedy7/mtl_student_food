@@ -206,6 +206,17 @@ def extract(raw: dict) -> "dict | None":
     # Drop places without enough signal
     if rating is None or reviews < 5:
         return None
+    # Google requires attributions to be displayed verbatim when present. Nearby
+    # Search returns the field empty in practice, but carry it through rather than
+    # discover later that we dropped something we were obliged to show.
+    #
+    # Deliberately NOT collecting photos[].html_attributions. Those are photographer
+    # credits, and the obligation to show them attaches to displaying the photo.
+    # This app displays no photos, so surfacing the credits would attribute images
+    # that are not shown — and would store 3000 individuals' names for nothing.
+    # If photos are ever displayed, collect and render them here.
+    attributions = [a for a in (raw.get("html_attributions") or []) if a]
+
     return {
         "id": place_id,
         "name": name,
@@ -216,6 +227,7 @@ def extract(raw: dict) -> "dict | None":
         "price": price,          # may be None
         "types": [t for t in types if not t.startswith("point_of_interest")
                   and t not in ("establishment", "food")],
+        **({"attributions": sorted(set(attributions))} if attributions else {}),
         # These will be filled by build_networks.py
         "walk_node":   None,
         "bike_node":   None,
@@ -240,14 +252,20 @@ def _rebuild_from_bank(bank) -> "tuple[list, dict]":
     """
     seen = {}
     n_resp = 0
+    response_attributions = set()
     for rec in bank.responses():
         n_resp += 1
-        for raw in rec.get("response", {}).get("results", []):
+        resp = rec.get("response", {})
+        # Response-level attributions apply to the result set as a whole.
+        response_attributions.update(a for a in (resp.get("html_attributions") or []) if a)
+        for raw in resp.get("results", []):
             p = extract(raw)
             if p and p["id"] not in seen:
                 seen[p["id"]] = p
 
     payload = _build_payload(seen)
+    if response_attributions:
+        payload["meta"]["attributions"] = sorted(response_attributions)
     write_json(OUT_PATH, payload)
     print(f"  rebuilt from {n_resp} banked responses -> {len(seen)} unique places")
     return list(seen.values()), payload

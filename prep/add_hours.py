@@ -26,7 +26,7 @@ import sys
 import time
 from pathlib import Path
 
-from jsonio import read_json, write_json
+from jsonio import ensure_utf8_stdout, read_json, write_json
 
 import requests
 
@@ -72,6 +72,9 @@ def fetch_hours(place_id: str) -> "list | None":
 
 
 def main():
+    # Place names contain characters the Windows console (cp1252) cannot
+    # encode; without this a progress line can kill a paid run.
+    ensure_utf8_stdout()
     parser = argparse.ArgumentParser()
     parser.add_argument("--yes", action="store_true", help="Skip confirmation prompt")
     args = parser.parse_args()

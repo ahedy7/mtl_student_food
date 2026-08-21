@@ -14,7 +14,7 @@ import json
 import math
 from pathlib import Path
 
-from snap import GRID_DEG, SPEED_MPS, haversine
+from snap import GRID_DEG, MAX_SNAP_M, SPEED_MPS, haversine
 
 DATA_DIR = Path(__file__).parent.parent / "viz" / "data"
 
@@ -56,8 +56,8 @@ class Graph:
         """Snap a pin the way app.js does: nearest node in the 3x3 cell block."""
         br, bc = math.floor(lat / GRID_DEG), math.floor(lon / GRID_DEG)
         best_d, best_i = float("inf"), -1
-        for dr in (-1, 0, 1):
-            for dc in (-1, 0, 1):
+        for dr in range(-3, 4):
+            for dc in range(-3, 4):
                 for i in self.grid.get((br + dr, bc + dc), ()):
                     nlat, nlon = self.nodes[i]
                     d = (nlat - lat) ** 2 + (nlon - lon) ** 2
@@ -65,7 +65,13 @@ class Graph:
                         best_d, best_i = d, i
         if best_i < 0:
             raise ValueError(f"no {self.prefix} node near ({lat}, {lon})")
-        return best_i, haversine(lat, lon, *self.nodes[best_i])
+        snap_m = haversine(lat, lon, *self.nodes[best_i])
+        # Mirrors MAX_PIN_SNAP_M in viz/app.js: past 500 m the nearest node is
+        # somewhere the user cannot actually reach (across water, typically).
+        if snap_m > MAX_SNAP_M:
+            raise ValueError(f"nearest {self.prefix} node is {snap_m:.0f} m away "
+                             f"(limit {MAX_SNAP_M} m) from ({lat}, {lon})")
+        return best_i, snap_m
 
     def dijkstra(self, start: int, cutoff_sec: float) -> list:
         """Travel time in seconds from `start`; inf past the cutoff."""

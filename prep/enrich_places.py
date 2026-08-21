@@ -25,7 +25,7 @@ import time
 from datetime import date
 from pathlib import Path
 
-from jsonio import read_json, write_json
+from jsonio import ensure_utf8_stdout, read_json, write_json
 
 import requests
 
@@ -85,7 +85,14 @@ def fetch_details(place_id: str, api_key: str) -> dict:
         recent_share  = None
         review_sample = 0
 
-    return {"hours": hours, "recent_share": recent_share, "review_sample": review_sample}
+    # Attributions must be displayed verbatim where returned. Details is more
+    # likely than Nearby Search to carry them.
+    attributions = [a for a in (data.get("html_attributions") or []) if a]
+
+    out = {"hours": hours, "recent_share": recent_share, "review_sample": review_sample}
+    if attributions:
+        out["attributions"] = sorted(set(attributions))
+    return out
 
 
 def gem_review_ceiling(places: list, percentile: int = GEM_PERCENTILE) -> int:
@@ -130,6 +137,9 @@ def prioritise(todo: list, places: list) -> "tuple[list, dict]":
 
 
 def main():
+    # Place names contain characters the Windows console (cp1252) cannot
+    # encode; without this a progress line can kill a paid run.
+    ensure_utf8_stdout()
     parser = argparse.ArgumentParser()
     parser.add_argument("--limit", type=int, default=200,
                         help="Max API calls (default: 200, ~$4.40)")

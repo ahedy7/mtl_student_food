@@ -25,7 +25,7 @@ import sys
 from datetime import date
 from pathlib import Path
 
-from jsonio import read_json, write_json
+from jsonio import ensure_utf8_stdout, read_json, write_json
 
 from snap import SnapError, annotate_places as snap_annotate_places
 
@@ -253,6 +253,9 @@ def annotate_places(walk_nodes: list, bike_nodes: list, mark_unreachable: bool =
 
 
 def main(mark_unreachable: bool = False):
+    # Place names contain characters the Windows console (cp1252) cannot
+    # encode; without this a progress line can kill a paid run.
+    ensure_utf8_stdout()
     if not _OSM_AVAILABLE:
         print("ERROR: osmnx / networkx not installed. Cannot download from OSM.")
         print("Install with: pip install osmnx networkx")

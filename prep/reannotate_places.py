@@ -26,7 +26,7 @@ import json
 import sys
 from pathlib import Path
 
-from jsonio import read_json, write_json
+from jsonio import ensure_utf8_stdout, read_json, write_json
 
 from graph import Graph
 from snap import (BOUND_SPEED_FACTOR, SnapError, annotate_places, check_crow_bound,
@@ -65,6 +65,12 @@ SAMPLE_PINS = [
     ("Old Montreal", 45.5076, -73.5539),
     ("NDG",          45.4860, -73.6261),
     ("Villeray",     45.5459, -73.6100),
+    # Southern coverage, added with the widened bbox. These matter most: they are
+    # the newest part of the graph, and Ile-des-Soeurs is an island whose walk
+    # network connects to the mainland only over bridges.
+    ("Verdun",       45.4620, -73.5720),
+    ("Ile-des-Soeurs", 45.4570, -73.5480),
+    ("Westmount",    45.4870, -73.5980),
 ]
 SAMPLE_CUTOFFS_MIN = (10, 30)
 
@@ -82,12 +88,21 @@ def check_sample_pins(places: list) -> bool:
           f"(x{BOUND_SPEED_FACTOR:g} mode speed) …")
 
     total_violations = 0
+    gaps = 0
     for mode in ("walk", "bike"):
         graph = Graph(mode)
         for label, lat, lon in SAMPLE_PINS:
             for cutoff_min in SAMPLE_CUTOFFS_MIN:
                 cutoff_sec = cutoff_min * 60
-                results = graph.reachable(places, lat, lon, cutoff_sec)
+                try:
+                    results = graph.reachable(places, lat, lon, cutoff_sec)
+                except ValueError as exc:
+                    # No node near the pin. Report it as a coverage gap rather than
+                    # crashing — the app now shows the user the same thing.
+                    print(f"  GAP  {mode:4} {label:15} {cutoff_min:2d} min  "
+                          f"no {mode} network at this pin ({exc})")
+                    gaps += 1
+                    continue
                 violations = check_crow_bound(lat, lon, results, mode, cutoff_sec)
                 flag = "FAIL" if violations else "ok"
                 print(f"  {flag:4} {mode:4} {label:13} {cutoff_min:2d} min  "
@@ -107,6 +122,9 @@ def check_sample_pins(places: list) -> bool:
 
 
 def main():
+    # Place names contain characters the Windows console (cp1252) cannot
+    # encode; without this a progress line can kill a paid run.
+    ensure_utf8_stdout()
     parser = argparse.ArgumentParser()
     parser.add_argument("--dry-run", action="store_true",
                         help="Report what would change without writing places.json")
