@@ -25,6 +25,8 @@ import time
 from datetime import date
 from pathlib import Path
 
+from jsonio import read_json, write_json
+
 import requests
 
 COST_PER_CALL = 0.022   # USD: Basic + Contact + Atmosphere tiers
@@ -139,7 +141,7 @@ def main():
     if not api_key:
         sys.exit("Set GOOGLE_PLACES_API_KEY env var before running.")
 
-    raw    = json.loads(PLACES_PATH.read_text())
+    raw    = read_json(PLACES_PATH)
     places = raw["places"]
 
     # Skip places that already have both fields; hidden-gems candidates first
@@ -189,14 +191,14 @@ def main():
             errors += 1
 
         if (i + 1) % SAVE_EVERY == 0:
-            PLACES_PATH.write_text(json.dumps(raw, ensure_ascii=False, separators=(",", ":")))
+            write_json(PLACES_PATH, raw)
             print(f"  {i+1}/{len(todo)}  ({round((i+1)/len(todo)*100)}%)  –  saved")
 
         time.sleep(DELAY_S)
 
     # Surfaced in the UI as "Data updated N days ago" (renderDataAge in viz/app.js).
     raw.setdefault("meta", {})["enriched"] = date.today().isoformat()
-    PLACES_PATH.write_text(json.dumps(raw, ensure_ascii=False, separators=(",", ":")))
+    write_json(PLACES_PATH, raw)
     print(f"\nDone. {fetched} enriched, {errors} errors. Actual cost ~${fetched * COST_PER_CALL:.2f}")
 
 

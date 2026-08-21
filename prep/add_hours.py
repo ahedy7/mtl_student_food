@@ -26,6 +26,8 @@ import sys
 import time
 from pathlib import Path
 
+from jsonio import read_json, write_json
+
 import requests
 
 API_KEY = os.environ.get("GOOGLE_PLACES_API_KEY", "")
@@ -74,7 +76,7 @@ def main():
     parser.add_argument("--yes", action="store_true", help="Skip confirmation prompt")
     args = parser.parse_args()
 
-    raw    = json.loads(PLACES_PATH.read_text())
+    raw    = read_json(PLACES_PATH)
     places = raw["places"]
 
     todo = [p for p in places if "hours" not in p]
@@ -101,13 +103,13 @@ def main():
             errors += 1
 
         if (i + 1) % SAVE_EVERY == 0:
-            PLACES_PATH.write_text(json.dumps(raw, ensure_ascii=False, separators=(",", ":")))
+            write_json(PLACES_PATH, raw)
             pct = round((i + 1) / len(todo) * 100)
             print(f"  {i+1}/{len(todo)}  ({pct}%)  –  saved")
 
         time.sleep(DELAY_S)
 
-    PLACES_PATH.write_text(json.dumps(raw, ensure_ascii=False, separators=(",", ":")))
+    write_json(PLACES_PATH, raw)
 
     has = sum(1 for p in places if p.get("hours") is not None)
     print(f"\nDone. {has}/{len(places)} places have hours data. Errors: {errors}")

@@ -24,6 +24,8 @@ import time
 from datetime import date
 from pathlib import Path
 
+from jsonio import read_json, write_json
+
 import requests
 
 COST_PER_CALL = 0.017   # USD, Places Details Basic Data tier
@@ -59,8 +61,8 @@ def main():
     args = parser.parse_args()
 
     today   = date.today().isoformat()
-    places  = json.loads(PLACES_PATH.read_text())["places"]
-    history = json.loads(HISTORY_PATH.read_text()) if HISTORY_PATH.exists() else {}
+    places  = read_json(PLACES_PATH)["places"]
+    history = read_json(HISTORY_PATH) if HISTORY_PATH.exists() else {}
 
     def last_date(p):
         h = history.get(p["id"])
@@ -98,10 +100,10 @@ def main():
                 print(f"  x {p['name']}: {e}")
                 errors += 1
             if (i + 1) % SAVE_EVERY == 0:
-                HISTORY_PATH.write_text(json.dumps(history, separators=(",", ":")))
+                write_json(HISTORY_PATH, history)
                 print(f"  {i+1}/{len(todo)} saved")
             time.sleep(DELAY_S)
-        HISTORY_PATH.write_text(json.dumps(history, separators=(",", ":")))
+        write_json(HISTORY_PATH, history)
         print(f"Done. {updated} updated, {errors} errors. ~${updated * COST_PER_CALL:.2f} spent")
     else:
         print(f"[free] Snapshotting {len(todo)} places from places.json (no API calls)")
@@ -110,7 +112,7 @@ def main():
             return
         for p in todo:
             history.setdefault(p["id"], []).append({"date": today, "count": p["reviews"]})
-        HISTORY_PATH.write_text(json.dumps(history, separators=(",", ":")))
+        write_json(HISTORY_PATH, history)
         print(f"Done. {len(todo)} places snapshotted.")
 
 

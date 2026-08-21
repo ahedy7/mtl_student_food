@@ -26,6 +26,8 @@ import json
 import sys
 from pathlib import Path
 
+from jsonio import read_json, write_json
+
 from graph import Graph
 from snap import (BOUND_SPEED_FACTOR, SnapError, annotate_places, check_crow_bound,
                   verify_annotation)
@@ -47,7 +49,7 @@ def load_nodes(prefix: str) -> list:
 
     meta_path = DATA_DIR / f"{prefix}_meta.json"
     if meta_path.exists():
-        declared = json.loads(meta_path.read_text(encoding="utf-8")).get("node_count")
+        declared = read_json(meta_path).get("node_count")
         if declared is not None and declared != len(nodes):
             sys.exit(f"{prefix}: {meta_path.name} declares {declared} nodes but "
                      f"{path.name} holds {len(nodes)} — the two are out of sync.")
@@ -120,7 +122,7 @@ def main():
     if not PLACES_PATH.exists():
         sys.exit(f"{PLACES_PATH} not found — run pull_places.py first.")
 
-    data = json.loads(PLACES_PATH.read_text(encoding="utf-8"))
+    data = read_json(PLACES_PATH)
     places = data["places"]
 
     walk_nodes = load_nodes("walk")
@@ -170,10 +172,7 @@ def main():
         print("\n--dry-run: places.json not written.")
         return
 
-    PLACES_PATH.write_text(
-        json.dumps(data, ensure_ascii=False, separators=(",", ":")),
-        encoding="utf-8",
-    )
+    write_json(PLACES_PATH, data)
     print(f"\nWrote {PLACES_PATH}")
 
 

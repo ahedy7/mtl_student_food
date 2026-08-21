@@ -20,6 +20,8 @@ import time
 from datetime import date
 from pathlib import Path
 
+from jsonio import preflight, read_json, write_json
+
 import requests
 
 API_KEY = os.environ.get("GOOGLE_PLACES_API_KEY", "")
@@ -134,6 +136,7 @@ SEARCH_CENTERS = [
 ]
 
 PLACE_TYPES = ["restaurant", "cafe"]
+CHECKPOINT_EVERY = 5   # centres between atomic saves
 DELAY_S = 2.1   # API requires >2 s between page_token requests
 
 
@@ -198,6 +201,24 @@ def extract(raw: dict) -> "dict | None":
     }
 
 
+def _build_payload(seen: dict) -> dict:
+    """Assemble the places.json payload from whatever has been gathered so far."""
+    places = list(seen.values())
+    mean_rating = (round(sum(p["rating"] for p in places) / len(places), 4)
+                   if places else 0.0)
+    return {
+        "meta": {
+            "mean_rating": mean_rating,
+            "count": len(places),
+            # Surfaced in the UI as "Data updated N days ago" (see renderDataAge
+            # in viz/app.js), so a stale deploy is visible without digging.
+            "generated": date.today().isoformat(),
+            "note": "walk_node and bike_node are filled by build_networks.py",
+        },
+        "places": places,
+    }
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--yes", action="store_true", help="Skip confirmation prompt")
@@ -211,6 +232,16 @@ def main():
         answer = input("Proceed? [y/N] ").strip().lower()
         if answer != "y":
             sys.exit("Aborted.")
+
+    # Prove we can write non-cp1252 text here BEFORE spending anything. A full
+    # 60-centre pull was once lost to a UnicodeEncodeError raised by the final
+    # write — 3003 places gathered, then destroyed by the save. One second here
+    # beats discovering it after the last API call.
+    try:
+        preflight(OUT_PATH)
+    except Exception as exc:
+        sys.exit(f"Pre-flight write test failed, refusing to spend: {exc}")
+    print("Pre-flight write test: OK")
 
     seen = {}  # type: dict[str, dict]
     total_requests = 0
@@ -234,23 +265,18 @@ def main():
                   + ("   << HIT 60 CAP - subdivide this cell" if hit_cap else ""))
             time.sleep(0.3)
 
+        # Checkpoint. Writes are atomic, so an interrupted run leaves the last
+        # good checkpoint rather than a truncated file, and costs at most the
+        # calls made since it.
+        if (i + 1) % CHECKPOINT_EVERY == 0:
+            write_json(OUT_PATH, _build_payload(seen))
+            print(f"  … checkpointed {len(seen)} places at centre {i+1}", flush=True)
+
     places = list(seen.values())
-    mean_rating = round(sum(p["rating"] for p in places) / len(places), 4) if places else 0.0
+    payload = _build_payload(seen)
+    mean_rating = payload["meta"]["mean_rating"]
 
-    payload = {
-        "meta": {
-            "mean_rating": mean_rating,
-            "count": len(places),
-            # Surfaced in the UI as "Data updated N days ago" (see renderDataAge
-            # in viz/app.js), so a stale deploy is visible without digging.
-            "generated": date.today().isoformat(),
-            "note": "walk_node and bike_node are filled by build_networks.py",
-        },
-        "places": places,
-    }
-
-    OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    OUT_PATH.write_text(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
+    write_json(OUT_PATH, payload)
     print(f"\nWrote {len(places)} places → {OUT_PATH}")
     print(f"Mean rating: {mean_rating}")
 
@@ -262,7 +288,7 @@ def main():
 def _snapshot_review_history(places: list, data_dir: Path) -> None:
     """Append today's review counts to review_history.json (no API calls)."""
     history_path = data_dir / "review_history.json"
-    history = json.loads(history_path.read_text()) if history_path.exists() else {}
+    history = read_json(history_path) if history_path.exists() else {}
     today = date.today().isoformat()
     added = 0
     for p in places:
@@ -270,7 +296,7 @@ def _snapshot_review_history(places: list, data_dir: Path) -> None:
         if not hist or hist[-1]["date"] != today:
             hist.append({"date": today, "count": p["reviews"]})
             added += 1
-    history_path.write_text(json.dumps(history, separators=(",", ":")))
+    write_json(history_path, history)
     print(f"Snapshotted {added} review counts → {history_path}")
 
 

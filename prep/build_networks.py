@@ -25,6 +25,8 @@ import sys
 from datetime import date
 from pathlib import Path
 
+from jsonio import read_json, write_json
+
 from snap import SnapError, annotate_places as snap_annotate_places
 
 try:
@@ -129,7 +131,7 @@ def write_binary_files(prefix: str, node_bytes: bytes, edge_bytes: bytes,
         "bbox": bbox,
         "max_time_clamped_s": MAX_TIME_S,
     }
-    (DATA_DIR / f"{prefix}_meta.json").write_text(json.dumps(meta))
+    write_json(DATA_DIR / f"{prefix}_meta.json", meta)
 
     total_kb = (len(node_bytes) + len(edge_bytes) + len(time_bytes)) / 1024
     print(f"  Wrote {prefix}_nodes.bin / _edges.bin / _times.bin / _meta.json  "
@@ -176,7 +178,7 @@ def convert_json_to_binary():
             print(f"  {json_path.name} not found – skipping {prefix}")
             continue
         print(f"\n=== Converting {json_path.name} → binary ===")
-        payload = json.loads(json_path.read_text())
+        payload = read_json(json_path)
         json_nodes = payload["nodes"]   # [[lat, lon], ...]
         json_edges = payload["edges"]   # [[from, to, sec], ...]
 
@@ -227,7 +229,7 @@ def annotate_places(walk_nodes: list, bike_nodes: list, mark_unreachable: bool =
         print("Run pull_places.py first, then re-run build_networks.py.")
         return
 
-    data = json.loads(PLACES_PATH.read_text(encoding="utf-8"))
+    data = read_json(PLACES_PATH)
     places = data["places"]
     print(f"\nAnnotating {len(places)} places with nearest graph nodes …")
 
@@ -246,10 +248,7 @@ def annotate_places(walk_nodes: list, bike_nodes: list, mark_unreachable: bool =
         print(f"  marked unreachable by {u['mode']}: {u['name']}  ({shown})")
 
     data.setdefault("meta", {})["annotated"] = date.today().isoformat()
-    PLACES_PATH.write_text(
-        json.dumps(data, ensure_ascii=False, separators=(",", ":")),
-        encoding="utf-8",
-    )
+    write_json(PLACES_PATH, data)
     print(f"Updated {PLACES_PATH}")
 
 
