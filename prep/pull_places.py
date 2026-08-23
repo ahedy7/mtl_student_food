@@ -1,5 +1,5 @@
 """
-pull_places.py  –  run once
+pull_places.py  –  run once (or with --round2 for dense-core subdivision)
 Fetches restaurants & cafes from Google Places API across central Montreal
 and writes viz/data/places.json.
 
@@ -9,6 +9,8 @@ Prints the estimate and asks for confirmation before fetching.
 Usage:
     export GOOGLE_PLACES_API_KEY=your_key_here
     python prep/pull_places.py [--yes]
+    python prep/pull_places.py --round2 [--yes]   # dense-core subdivision
+    python prep/pull_places.py --round2 --dry-run  # preview queries and cost, no API calls
 """
 
 import argparse
@@ -26,8 +28,7 @@ from rawbank import RawBank
 import requests
 
 API_KEY = os.environ.get("GOOGLE_PLACES_API_KEY", "")
-if not API_KEY:
-    sys.exit("Set GOOGLE_PLACES_API_KEY env var before running.")
+# Key is checked at run-time; --dry-run does not need it.
 
 NEARBY_URL = "https://maps.googleapis.com/maps/api/place/nearbysearch/json"
 OUT_PATH = Path(__file__).parent.parent / "viz" / "data" / "places.json"
@@ -145,22 +146,74 @@ PLACE_TYPES = ["restaurant", "cafe"]
 CHECKPOINT_EVERY = 5   # centres between atomic saves
 DELAY_S = 2.1   # API requires >2 s between page_token requests
 
+# ── Round-2 centres (dense core only) ────────────────────────────────────────
+#
+# radius=0 is the bank-key sentinel for rankby=distance queries. These are never
+# mixed with radius queries, so there is no key collision with round-1 entries.
+#
+# 4 r=566m parents subdivided into 16 child centres at r=283m.
+# Parents: (45.50609,-73.56260), (45.52764,-73.60361),
+#          (45.52046,-73.58310), (45.52764,-73.59335)
+# All within 523m of the Plateau/Mile End core; all had both types capped.
+ROUND2_CENTERS = [
+    # ---- A: child centres of r=566m parents (each nominally covers r=283m) ----
+    (45.50863, -73.55897, 0),
+    (45.50863, -73.56623, 0),
+    (45.50355, -73.55897, 0),
+    (45.50355, -73.56623, 0),
+    (45.53018, -73.59998, 0),
+    (45.53018, -73.60724, 0),
+    (45.52510, -73.59998, 0),
+    (45.52510, -73.60724, 0),
+    (45.52300, -73.57947, 0),
+    (45.52300, -73.58673, 0),
+    (45.51792, -73.57947, 0),
+    (45.51792, -73.58673, 0),
+    (45.53018, -73.58972, 0),
+    (45.53018, -73.59698, 0),
+    (45.52510, -73.58972, 0),
+    (45.52510, -73.59698, 0),
+]
+
+
+def _haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Straight-line distance in metres between two lat/lon points."""
+    R = 6_371_000
+    d = math.radians
+    a = (math.sin(d(lat2 - lat1) / 2) ** 2
+         + math.cos(d(lat1)) * math.cos(d(lat2)) * math.sin(d(lon2 - lon1) / 2) ** 2)
+    return R * 2 * math.asin(math.sqrt(a))
+
 
 def fetch_nearby(lat: float, lon: float, radius_m: int, place_type: str,
-                 bank: "RawBank | None" = None) -> "list[dict]":
+                 bank: "RawBank | None" = None,
+                 rankby_distance: bool = False) -> "list[dict]":
     """
     Fetch one (centre, type) query, up to 3 pages.
 
     Every response is banked verbatim before anything parses it, so the paid
     bytes survive any later failure and places.json can be rebuilt offline.
+
+    rankby_distance=True uses rankby=distance instead of a fixed radius. The
+    centre tuple uses radius=0 as a bank-key sentinel so resume logic is
+    unchanged — a (lat, lon, 0, type) key cannot collide with any round-1 entry.
+    radius and rankby=distance are mutually exclusive in the API.
     """
-    centre = (lat, lon, radius_m)
-    params = {
-        "key": API_KEY,
-        "location": f"{lat},{lon}",
-        "radius": radius_m,
-        "type": place_type,
-    }
+    centre = (lat, lon, radius_m)   # radius_m=0 for distance-ranked queries
+    if rankby_distance:
+        params = {
+            "key": API_KEY,
+            "location": f"{lat},{lon}",
+            "rankby": "distance",
+            "type": place_type,
+        }
+    else:
+        params = {
+            "key": API_KEY,
+            "location": f"{lat},{lon}",
+            "radius": radius_m,
+            "type": place_type,
+        }
     results = []
     page = 0
     while True:
@@ -242,13 +295,16 @@ def _key(centre, place_type):
     return (round(lat, 5), round(lon, 5), int(radius), place_type)
 
 
-def _rebuild_from_bank(bank) -> "tuple[list, dict]":
+def _rebuild_from_bank(bank, coverage: "dict | None" = None) -> "tuple[list, dict]":
     """
     Rebuild places.json from banked raw responses. Pure local transform, no API.
 
     This is the only path that writes places.json, so a run that fetches nothing
     new produces exactly the same output as one that fetched everything — and
     changing how places are parsed or filtered costs nothing to re-apply.
+
+    coverage: optional dict of {"lat,lon": radius_m} for round-2 cells, persisted
+    into meta so completeness is inspectable in the shipped data.
     """
     seen = {}
     n_resp = 0
@@ -266,6 +322,8 @@ def _rebuild_from_bank(bank) -> "tuple[list, dict]":
     payload = _build_payload(seen)
     if response_attributions:
         payload["meta"]["attributions"] = sorted(response_attributions)
+    if coverage:
+        payload["meta"]["coverage_radius_m"] = coverage
     write_json(OUT_PATH, payload)
     print(f"  rebuilt from {n_resp} banked responses -> {len(seen)} unique places")
     return list(seen.values()), payload
@@ -294,21 +352,33 @@ def main():
     parser.add_argument("--yes", action="store_true", help="Skip confirmation prompt")
     parser.add_argument("--force", action="store_true",
                         help="Re-fetch every centre, ignoring what is already banked")
+    parser.add_argument("--round2", action="store_true",
+                        help="Pull dense-core subdivision centres with rankby=distance")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="Print query list and cost estimate; make no API calls")
     args = parser.parse_args()
+
+    if not args.dry_run and not API_KEY:
+        sys.exit("Set GOOGLE_PLACES_API_KEY env var before running.")
 
     ensure_utf8_stdout()
     bank = RawBank()
 
+    centers = ROUND2_CENTERS if args.round2 else SEARCH_CENTERS
+    rankby_distance = args.round2
+
     # Resume: anything already banked has been paid for once and is not re-fetched.
     done = set() if args.force else bank.completed()
-    todo_queries = [(c, t) for c in SEARCH_CENTERS for t in PLACE_TYPES
+    todo_queries = [(c, t) for c in centers for t in PLACE_TYPES
                     if args.force or _key(c, t) not in done]
-    skipped = len(SEARCH_CENTERS) * len(PLACE_TYPES) - len(todo_queries)
+    skipped = len(centers) * len(PLACE_TYPES) - len(todo_queries)
 
     max_calls = len(todo_queries) * 3   # 3 pages max per query
     est = max_calls * 0.032
     st = bank.stats()
-    print(f"Centres: {len(SEARCH_CENTERS)}  ({len(PLACE_TYPES)} types x 3 pages each)")
+    mode_label = "rankby=distance (round 2)" if args.round2 else "radius (round 1)"
+    print(f"Mode           : {mode_label}")
+    print(f"Centres        : {len(centers)}  ({len(PLACE_TYPES)} types x 3 pages each)")
     if st["responses"]:
         print(f"Already banked : {st['queries_complete']} complete queries, "
               f"{st['responses']} responses, {st['bytes']/1024:.0f} KB")
@@ -317,6 +387,14 @@ def main():
     print(f"Will skip      : {skipped} query(ies) already banked  (cost $0.00)")
     print(f"Will fetch     : {len(todo_queries)} query(ies)")
     print(f"Estimated cost : up to ~${est:.2f}  ({max_calls} calls max x $0.032 Nearby Search)")
+
+    if args.dry_run:
+        print(f"\n--- DRY RUN: query list ({len(todo_queries)} queries) ---")
+        for i, ((lat, lon, r), ptype) in enumerate(todo_queries, 1):
+            label = "rankby=distance" if args.round2 else f"r={r}m"
+            print(f"  [{i:>3}] ({lat:.5f}, {lon:.5f})  {label}  type={ptype}")
+        print(f"\n--- No API calls made. Remove --dry-run to proceed. ---")
+        return
 
     if not todo_queries:
         print("\nNothing to fetch. Rebuilding places.json from the bank (free) ...")
@@ -338,23 +416,53 @@ def main():
         sys.exit(f"Pre-flight write test failed, refusing to spend: {exc}")
     print("Pre-flight write test: OK")
 
+    # Load known place IDs so we can report net-new per query.
+    known_ids = set()
+    if OUT_PATH.exists():
+        try:
+            known_ids = {p["id"] for p in read_json(OUT_PATH)["places"]}
+        except Exception:
+            pass
+
     total_requests = 0
     capped = 0
+    still_capped = 0
+    coverage = {}   # "lat,lon" → farthest result distance in metres
+
     with bank:
         for n, ((lat, lon, radius_m), ptype) in enumerate(todo_queries, 1):
-            print(f"[{n}/{len(todo_queries)}] ({lat:.4f},{lon:.4f}) r={radius_m}m "
-                  f"type={ptype} …", flush=True)
-            raws = fetch_nearby(lat, lon, radius_m, ptype, bank=bank)
+            label = "rankby=distance" if rankby_distance else f"r={radius_m}m"
+            print(f"[{n}/{len(todo_queries)}] ({lat:.5f},{lon:.5f})  {label}  type={ptype} …",
+                  flush=True)
+            raws = fetch_nearby(lat, lon, radius_m, ptype, bank=bank,
+                                rankby_distance=rankby_distance)
             total_requests += 1
+
+            # Per-query stats
             hit_cap = len(raws) >= 60
             capped += hit_cap
-            print(f"  +{len(raws)} results"
-                  + ("   << HIT 60 CAP - subdivide this cell" if hit_cap else ""))
+            if hit_cap:
+                still_capped += 1
+
+            net_new = sum(1 for r in raws if r.get("place_id") not in known_ids)
+
+            # Coverage radius: haversine from centre to farthest returned result
+            far_m = 0.0
+            for r in raws:
+                geo = r.get("geometry", {}).get("location", {})
+                rlat, rlon = geo.get("lat"), geo.get("lng")
+                if rlat is not None and rlon is not None:
+                    far_m = max(far_m, _haversine_m(lat, lon, rlat, rlon))
+            cov_key = f"{lat:.5f},{lon:.5f}"
+            coverage[cov_key] = round(far_m)
+
+            cap_flag = "  << STILL CAPPED" if hit_cap else ""
+            print(f"  +{len(raws)} results  |  {net_new} net-new  |  farthest {far_m:.0f}m{cap_flag}")
             time.sleep(0.3)
 
     # places.json is a pure local transform over the bank, so build it from there
     # rather than from whatever this run happened to hold in memory.
-    places, payload = _rebuild_from_bank(bank)
+    places, payload = _rebuild_from_bank(bank, coverage=coverage if args.round2 else None)
     mean_rating = payload["meta"]["mean_rating"]
     print(f"\nWrote {len(places)} places → {OUT_PATH}")
     print(f"Mean rating: {mean_rating}")
@@ -363,9 +471,11 @@ def main():
     # so we snapshot them here at no extra cost.
     _snapshot_review_history(places, OUT_PATH.parent)
 
-    if capped:
-        print(f"\nWARNING: {capped} (centre, type) query(ies) hit the 60-result ceiling. "
-              f"Those cells lost their long tail — re-run the subdivision and pull again.")
+    if still_capped:
+        print(f"\nWARNING: {still_capped} round-2 query(ies) still hit the 60-result ceiling. "
+              f"Those cells need further subdivision.")
+    elif capped == 0 and args.round2:
+        print(f"\nAll round-2 cells returned fewer than 60 — dense core is provably exhausted.")
 
     # The bank is the only artefact here that cost money and cannot be rebuilt
     # locally. It is gitignored deliberately (raw Google content, and an

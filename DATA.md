@@ -171,21 +171,29 @@ The Nearby Search API returns at most 60 results per (centre, type) query, ranke
 by prominence. A cell that hits this ceiling silently drops its least-prominent
 places — exactly the long tail that the Hidden gems view is built on.
 
-**54 of 120 queries in the current pull hit the 60-result cap**, distributed across
-all four radius tiers (283 m, 566 m, 1131 m, 2263 m). The affected cells are
-concentrated in the Plateau, Mile End, and NDG/Verdun corridors — the densest
-restaurant areas — and in the larger southern cells that were added to extend
-coverage into Verdun and Wellington Street.
+**Round 1 (radius-ranked): 54 of 120 queries hit the cap**, distributed across all
+four radius tiers (283 m, 566 m, 1131 m, 2263 m). The affected cells are concentrated
+in the Plateau, Mile End, and NDG/Verdun corridors — the densest restaurant areas —
+and in the larger southern cells added to cover Verdun and Wellington Street.
 
-Because the API ranks by prominence, truncation removes the least-known places
-first. This means the corpus is more complete for well-reviewed establishments and
-systematically less complete for newer or lower-profile ones. Hidden gems — defined
-as high-rated places with few reviews — sit precisely in the population that
-truncation removes. The view is real but the corpus floor is soft in dense cells.
+**Round 2 (dense-core subdivision, `rankby=distance`):** The 4 most central capped
+566 m cells were split into 16 child cells at 283 m and re-queried with
+`rankby=distance`. All 16 child cells (32 queries) still returned exactly 60 results,
+confirming the core is genuinely denser than a single subdivision resolves. The pull
+added 247 net-new reachable places to the corpus. Coverage radii (distance to the
+60th result) are stored in `places.json` meta under `coverage_radius_m`.
 
-Fixing this requires round-2 subdivision: re-querying each capped cell at half the
-radius until no cell returns exactly 60. This has not been done. The limitation is
-structural, not a defect in the scoring logic.
+Further subdivision of these 16 cells to 141 m radius would be the logical next step
+but has not been done. The remaining 38 capped cells outside the dense core also
+wait for a demand-signal-guided pull.
+
+Because the API ranks by prominence in round 1, truncation removes the least-known
+places first. This means the corpus is more complete for well-reviewed establishments
+and systematically less complete for newer or lower-profile ones. Hidden gems —
+defined as high-rated places with few reviews — sit precisely in the population that
+prominence-ranked truncation removes. The view is real but the corpus floor is soft
+in dense cells. The `rankby=distance` round-2 queries recovered 40 additional
+hidden-gem candidates from this population.
 
 ---
 
