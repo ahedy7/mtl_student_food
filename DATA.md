@@ -197,6 +197,13 @@ wait for a demand-signal-guided pull. Round 2 delivered 247 net-new places at
 points toward further subdivision being equally or more productive; these cells are
 deferred pending a demand map, not because they are judged uneconomical.
 
+**Corpus exclusions:** 12 places in Longueuil (lat ~45.51–45.52, lon ~-73.49) appear
+in the raw pull but are excluded from `places.json` and all derived statistics. They
+fall east of the graph bbox (E edge −73.505) and return no walk or bike node — they
+can never appear in any result. Excluding them brings the active corpus to **3,240
+places**. The Hidden gems Q1 review-count threshold is computed from this corpus
+(Q1 = 113 reviews as of the 2026-08-23 pull).
+
 Because the API ranks by prominence in round 1, truncation removes the least-known
 places first. This means the corpus is more complete for well-reviewed establishments
 and systematically less complete for newer or lower-profile ones. Hidden gems —
@@ -213,8 +220,11 @@ hidden-gem candidates from this population.
 |---|---|---|
 | Round 1 | Main pull (3005 places, radius-ranked) | ~$11.52 |
 | Round 2 | Dense-core subdivision (247 net-new places, rankby=distance) | ~$3.07 |
-| Enrichment | Hours + recency for all places (Place Details) | ~$68.34 |
-| **Total** | | **~$83** |
+| Enrichment (partial) | Hours + recency enrichment actually billed to date | ~$6.67 |
+| **Actual spend to date** | | **~$21.26** |
+
+The $68.34 figure cited in session notes was a projection for full enrichment of all
+places at scale; it was not actually spent. Do not cite it as actual spend.
 
 Round 2 cost per net-new place: $3.07 / 247 ≈ $0.012. This is the benchmark for
 evaluating future subdivision rounds.

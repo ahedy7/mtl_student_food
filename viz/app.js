@@ -747,7 +747,19 @@ function render() {
     lastDistArr = null;
     lastGraph   = null;
     renderLayers([]);
-    renderList([]);
+    // Walk-mode failure: check whether bike reaches this spot. If it does, the
+    // island has cycle paths but no walk connection to the mainland — say so.
+    if (state.mode === "walk" && graphs.bike && gridLists.bike) {
+      const bikeNode = nearestNodeGrid(gridLists.bike, graphs.bike.nodeFlat, state.pin.lat, state.pin.lon);
+      if (bikeNode >= 0) {
+        document.getElementById("results-list").innerHTML =
+          `<div class="results-empty">This island has no walk connection to the mainland. Switch to <strong>Bike</strong> to see results.</div>`;
+        setStatus("error", "No walk network here — switch to Bike.");
+        return;
+      }
+    }
+    document.getElementById("results-list").innerHTML =
+      `<div class="results-empty">No ${state.mode === "walk" ? "walking" : "cycling"} network here — try a pin on a street.</div>`;
     setStatus("error",
       `No ${state.mode === "walk" ? "walking" : "cycling"} network here — try a pin on a street`);
     return;
