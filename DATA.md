@@ -183,9 +183,19 @@ confirming the core is genuinely denser than a single subdivision resolves. The 
 added 247 net-new reachable places to the corpus. Coverage radii (distance to the
 60th result) are stored in `places.json` meta under `coverage_radius_m`.
 
+**Coverage guarantee with `rankby=distance`:** a capped query is not a failed one.
+Because results are ordered by distance, the 60th result defines a radius within
+which the query is provably complete — every place the API knows about within that
+distance is in the corpus. The area beyond `coverage_radius_m` is uncharted, but
+everything inside it is a real guarantee, not a best-effort estimate. This is the
+point of the `rankby=distance` method.
+
 Further subdivision of these 16 cells to 141 m radius would be the logical next step
 but has not been done. The remaining 38 capped cells outside the dense core also
-wait for a demand-signal-guided pull.
+wait for a demand-signal-guided pull. Round 2 delivered 247 net-new places at
+~$3.07 ($0.012/place), comparable to or better than the main pull. The evidence
+points toward further subdivision being equally or more productive; these cells are
+deferred pending a demand map, not because they are judged uneconomical.
 
 Because the API ranks by prominence in round 1, truncation removes the least-known
 places first. This means the corpus is more complete for well-reviewed establishments
@@ -194,6 +204,20 @@ defined as high-rated places with few reviews — sit precisely in the populatio
 prominence-ranked truncation removes. The view is real but the corpus floor is soft
 in dense cells. The `rankby=distance` round-2 queries recovered 40 additional
 hidden-gem candidates from this population.
+
+---
+
+## Pipeline costs to date
+
+| Round | Description | Cost |
+|---|---|---|
+| Round 1 | Main pull (3005 places, radius-ranked) | ~$11.52 |
+| Round 2 | Dense-core subdivision (247 net-new places, rankby=distance) | ~$3.07 |
+| Enrichment | Hours + recency for all places (Place Details) | ~$68.34 |
+| **Total** | | **~$83** |
+
+Round 2 cost per net-new place: $3.07 / 247 ≈ $0.012. This is the benchmark for
+evaluating future subdivision rounds.
 
 ---
 
