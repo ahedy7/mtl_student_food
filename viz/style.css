@@ -880,16 +880,23 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
   #btn-filters-toggle {
     flex-shrink: 0;
     background: var(--surface2);
-    border: 1px solid var(--border);
+    border: 2px solid #e53935;
     border-radius: var(--radius);
     color: var(--text);
     font-size: 12px;
     padding: 5px 10px;
     cursor: pointer;
+    animation: pulse-red 1.2s ease-in-out infinite;
   }
-  #btn-filters-toggle.open {
+  #btn-filters-toggle.open,
+  #btn-filters-toggle.attention-done {
     border-color: var(--accent);
     color: var(--accent);
+    animation: none;
+  }
+  @keyframes pulse-red {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(229,57,53,0.5); }
+    50%       { box-shadow: 0 0 0 5px rgba(229,57,53,0); }
   }
 
   /* controls hidden by default on mobile; .open shows them */

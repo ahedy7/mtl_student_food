@@ -941,6 +941,19 @@ function handleMapClick({ coordinate }) {
   state.search = "";
   const sb = document.getElementById("search-bar");
   if (sb) sb.value = "";
+
+  // On mobile: close filters panel and scroll to results
+  if (window.innerWidth <= 700) {
+    const controlsPanel = document.getElementById("controls-panel");
+    const filtersBtn    = document.getElementById("btn-filters-toggle");
+    if (controlsPanel) controlsPanel.classList.remove("open");
+    if (filtersBtn)    { filtersBtn.classList.remove("open"); filtersBtn.textContent = "Filters ▾"; }
+    setTimeout(() => {
+      const list = document.getElementById("results-list");
+      if (list) list.scrollIntoView({ behavior: "smooth" });
+    }, 100);
+  }
+
   render();
 }
 
@@ -1004,10 +1017,18 @@ function initControls() {
   const filtersBtn = document.getElementById("btn-filters-toggle");
   const controlsPanel = document.getElementById("controls-panel");
   if (filtersBtn && controlsPanel) {
+    // Open filters by default on mobile
+    if (window.innerWidth <= 700) {
+      controlsPanel.classList.add("open");
+      filtersBtn.classList.add("open");
+      filtersBtn.textContent = "Filters ▴";
+    }
+
     filtersBtn.addEventListener("click", () => {
       const open = controlsPanel.classList.toggle("open");
       filtersBtn.classList.toggle("open", open);
       filtersBtn.textContent = open ? "Filters ▴" : "Filters ▾";
+      filtersBtn.classList.add("attention-done");
     });
   }
 
