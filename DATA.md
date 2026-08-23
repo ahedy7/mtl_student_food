@@ -165,6 +165,30 @@ repo, and an append-only file that grows every pull is a poor fit for git histor
 
 ---
 
+## Known coverage limits
+
+The Nearby Search API returns at most 60 results per (centre, type) query, ranked
+by prominence. A cell that hits this ceiling silently drops its least-prominent
+places — exactly the long tail that the Hidden gems view is built on.
+
+**54 of 120 queries in the current pull hit the 60-result cap**, distributed across
+all four radius tiers (283 m, 566 m, 1131 m, 2263 m). The affected cells are
+concentrated in the Plateau, Mile End, and NDG/Verdun corridors — the densest
+restaurant areas — and in the larger southern cells that were added to extend
+coverage into Verdun and Wellington Street.
+
+Because the API ranks by prominence, truncation removes the least-known places
+first. This means the corpus is more complete for well-reviewed establishments and
+systematically less complete for newer or lower-profile ones. Hidden gems — defined
+as high-rated places with few reviews — sit precisely in the population that
+truncation removes. The view is real but the corpus floor is soft in dense cells.
+
+Fixing this requires round-2 subdivision: re-querying each capped cell at half the
+radius until no cell returns exactly 60. This has not been done. The limitation is
+structural, not a defect in the scoring logic.
+
+---
+
 ## Summary of obligations
 
 | Obligation | Status |

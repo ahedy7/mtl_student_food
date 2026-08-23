@@ -42,7 +42,7 @@ const HEAT_MIN_VELOCITY = 1.5;   // reviews/week needed to qualify via velocity
 /* ── State ───────────────────────────────────────────────────────────────── */
 const state = {
   mode:     "walk",
-  cutoff:   20,        // minutes
+  cutoff:   15,        // minutes
   prices:   new Set(),   // empty = show all prices
   w:        0.6,       // quality weight (0 = all closeness, 1 = all quality)
   view:     "best",    // "best" | "gems"
@@ -132,6 +132,7 @@ function syncUIFromState() {
 /* ── Data ────────────────────────────────────────────────────────────────── */
 let places        = [];
 let meanRating    = 0;
+let corpusReviewQ1 = 0;   // 25th-percentile review count across full corpus; used by hiddenGems
 let graphs        = { walk: null, bike: null };
 let adjLists      = { walk: null, bike: null };
 let gridLists     = { walk: null, bike: null };
@@ -422,13 +423,13 @@ function assertCrowBound(survivors, cutoffSec, speedMps) {
 }
 
 function hiddenGems(survivors) {
-  const highRated = survivors.filter(p => p.rating >= 4.3);
-  if (!highRated.length) return [];
-  const counts = survivors.map(p => p.reviews).sort((a, b) => a - b);
-  const q1 = counts[Math.floor(counts.length * 0.25)];
-  return highRated
-    .filter(p => p.reviews <= q1)
-    .sort((a, b) => b._shrunkR - a._shrunkR);
+  // Threshold is the corpus-wide Q1 (not survivors' Q1) so the definition is
+  // stable across cutoffs and locations. Sorted by shrunk Bayesian rating, which
+  // slightly favours the more-reviewed end of the gem range.
+  return survivors
+    .filter(p => p.rating >= 4.3 && (p.reviews ?? 0) <= corpusReviewQ1)
+    .sort((a, b) => b._shrunkR - a._shrunkR)
+    .slice(0, 25);
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -606,7 +607,11 @@ function renderList(scored) {
   const items = state.view === "gems" ? hiddenGems(scored) : scored;
 
   if (!items.length) {
-    list.innerHTML = `<div class="results-empty">No restaurants found within ${state.cutoff} min. Try increasing the cutoff or moving the pin.</div>`;
+    if (state.view === "gems") {
+      list.innerHTML = `<div class="results-empty">No hidden gems here — try a longer cutoff or a different spot.</div>`;
+    } else {
+      list.innerHTML = `<div class="results-empty">No restaurants found within ${state.cutoff} min. Try increasing the cutoff or moving the pin.</div>`;
+    }
     return;
   }
 
@@ -623,7 +628,12 @@ function renderList(scored) {
 
   const mapsUrl = id => `https://www.google.com/maps/place/?q=place_id:${id}`;
 
-  list.innerHTML = filtered.slice(0, 60).map((p, i) => {
+  const cap = 60;
+  const countLabel = filtered.length > cap
+    ? `<div class="results-count">Showing top ${cap} of ${filtered.length}</div>`
+    : "";
+
+  list.innerHTML = countLabel + filtered.slice(0, cap).map((p, i) => {
     const isTop   = i < 3 && state.view === "best" && !q;
     const isGem   = state.view === "gems";
     const pct     = Math.round(p.score * 100);
@@ -815,6 +825,10 @@ async function loadData() {
   places        = placesData.places;
   meanRating    = placesData.meta.mean_rating;
   reviewHistory = histData ?? {};
+
+  // Compute corpus-wide Q1 review count once, used by hiddenGems() regardless of cutoff/location
+  const sorted = places.map(p => p.reviews ?? 0).sort((a, b) => a - b);
+  corpusReviewQ1 = sorted[Math.floor(sorted.length * 0.25)];
 
   graphs.walk   = walkData;
   graphs.bike   = bikeData;

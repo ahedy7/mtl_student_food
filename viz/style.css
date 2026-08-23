@@ -402,6 +402,13 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
 #results-list::-webkit-scrollbar { width: 4px; }
 #results-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
 
+.results-count {
+  padding: 6px 16px;
+  font-size: 11px;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border);
+}
+
 .results-empty {
   padding: 48px 24px;
   text-align: center;
