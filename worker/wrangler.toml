@@ -8,7 +8,7 @@ compatibility_date = "2026-08-01"
 [[d1_databases]]
 binding = "DB"
 database_name = "mtl_food_telemetry"
-database_id = "PASTE_THE_ID_FROM_wrangler_d1_create"
+database_id = "00000000-0000-0000-0000-000000000000"
 
 [vars]
 # Origin of the deployed Pages site. Not a security control (anyone can forge

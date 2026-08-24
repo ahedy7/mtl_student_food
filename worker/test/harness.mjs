@@ -74,7 +74,10 @@ add("cx/cy in Paris", 0, 204, () =>
 add('mode:"car"', 0, 204, () => call("POST", "/e", JSON.stringify({ ...PIN, mode: "car" })));
 add("weight:1.5", 0, 204, () => call("POST", "/e", JSON.stringify({ ...PIN, weight: 1.5 })));
 add("cutoff:0", 0, 204, () => call("POST", "/e", JSON.stringify({ ...PIN, cutoff: 0 })));
-add('price:"4"', 0, 204, () => call("POST", "/e", JSON.stringify({ ...PIN, price: "4" })));
+add('price:"4"', 1, 204, () => call("POST", "/e", JSON.stringify({ ...PIN, price: "4" })));
+add('price:"0,4"', 1, 204, () => call("POST", "/e", JSON.stringify({ ...PIN, price: "0,4" })));
+add('price:"5"', 0, 204, () => call("POST", "/e", JSON.stringify({ ...PIN, price: "5" })));
+add('price:"1,,2"', 0, 204, () => call("POST", "/e", JSON.stringify({ ...PIN, price: "1,,2" })));
 add("click, no rank", 0, 204, () => {
   const { rank, ...noRank } = CLICK;
   return call("POST", "/e", JSON.stringify(noRank));

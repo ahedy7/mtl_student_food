@@ -13,3 +13,6 @@ prep/data/raw_responses.jsonl
 
 # osmnx Overpass response cache, created by build_networks.py (86 MB, regenerable)
 cache/
+
+# Wrangler local dev state (SQLite, logs)
+worker/.wrangler/

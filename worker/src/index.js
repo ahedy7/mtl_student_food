@@ -30,7 +30,7 @@ const CY_MAX = Math.floor(BOUNDS.north / LAT_STEP);
 
 const MODES = new Set(["walk", "bike"]);
 const VIEWS = new Set(["best", "gems"]);
-const PRICE_RE = /^[123](,[123])*$/;
+const PRICE_RE = /^[0-4](,[0-4])*$/;
 
 function isInt(v) {
   return typeof v === "number" && Number.isInteger(v);

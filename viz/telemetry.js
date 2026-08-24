@@ -80,12 +80,12 @@
       var out = [];
       for (var i = 0; i < list.length; i++) {
         var n = parseInt(list[i], 10);
-        if (n >= 1 && n <= 3 && !seen[n]) {
+        if (n >= 0 && n <= 4 && !seen[n]) {
           seen[n] = true;
           out.push(n);
         }
       }
-      return out.sort().join(",");
+      return out.sort(function (a, b) { return a - b; }).join(",");
     } catch (err) {
       return "";
     }

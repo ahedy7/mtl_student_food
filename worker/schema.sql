@@ -17,7 +17,7 @@ CREATE TABLE IF NOT EXISTS pin_drops (
   mode          TEXT    NOT NULL,   -- 'walk' | 'bike'
   cutoff_min    INTEGER NOT NULL,
   weight        REAL    NOT NULL,   -- quality/closeness slider, 0..1
-  price         TEXT    NOT NULL,   -- sorted csv of selected tiers, e.g. '1,2'
+  price         TEXT    NOT NULL,   -- sorted csv of selected tiers 0..4 (Google price_level), e.g. '1,2' or '0,4'; "" means no filter
   view_mode     TEXT    NOT NULL,   -- 'best' | 'gems'
   result_count  INTEGER NOT NULL,
   coverage_m    INTEGER             -- coverage radius at that cell, NULL if unknown
