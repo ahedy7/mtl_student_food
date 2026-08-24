@@ -1,0 +1,19 @@
+name = "mtl-food-telemetry"
+main = "src/index.js"
+compatibility_date = "2026-08-01"
+
+# Deliberately no observability/logpush block. Request logs are the one place a
+# client IP could end up retained; leave them off.
+
+[[d1_databases]]
+binding = "DB"
+database_name = "mtl_food_telemetry"
+database_id = "PASTE_THE_ID_FROM_wrangler_d1_create"
+
+[vars]
+# Origin of the deployed Pages site. Not a security control (anyone can forge
+# an Origin header), just tidiness for the fetch fallback path.
+ALLOW_ORIGIN = "https://ahedy7.github.io"
+
+# "1" makes rejections return 400 with a reason. Never ship as "1".
+DEBUG = "0"

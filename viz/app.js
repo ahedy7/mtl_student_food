@@ -140,6 +140,7 @@ let reviewHistory = {};   // place_id → [{date, count}, ...]
 let lastScored    = [];
 let lastDistArr   = null;
 let lastGraph     = null;
+let coverageRadii = {};   // "lat,lon" → radius_m for round-2 pull centres
 
 /* ── deck.gl + MapLibre ──────────────────────────────────────────────────── */
 let deckgl = null;
@@ -263,6 +264,21 @@ function haversineM(lat1, lon1, lat2, lon2) {
   const dλ = (lon2 - lon1) * Math.PI / 180;
   const a  = Math.sin(dφ/2) ** 2 + Math.cos(φ1) * Math.cos(φ2) * Math.sin(dλ/2) ** 2;
   return 2 * R * Math.asin(Math.sqrt(a));
+}
+
+/* Returns the coverage radius (m) at the nearest pull centre to (lat, lon),
+   or null if no coverage data is loaded. Used by telemetry only. */
+function coverageAtPin(lat, lon) {
+  const entries = Object.entries(coverageRadii);
+  if (!entries.length) return null;
+  let best = null, bestD = Infinity;
+  for (const [key, r] of entries) {
+    const [clat, clon] = key.split(",").map(Number);
+    const dlat = lat - clat, dlon = lon - clon;
+    const d = dlat * dlat + dlon * dlon;
+    if (d < bestD) { bestD = d; best = r; }
+  }
+  return best;
 }
 
 /* Dijkstra single-source, capped at cutoffSec.
@@ -678,7 +694,7 @@ function renderList(scored) {
   }).join("");
 
   // Hover sync: list ↔ map
-  list.querySelectorAll(".result-item").forEach(el => {
+  list.querySelectorAll(".result-item").forEach((el, rank) => {
     el.addEventListener("mouseenter", () => {
       state.hover = el.dataset.id;
       renderLayers(lastScored);
@@ -699,6 +715,7 @@ function renderList(scored) {
           flyTo(place.lon, place.lat);
         }
       }
+      if (typeof Telemetry !== "undefined") Telemetry.resultClicked(rank);
     });
   });
 }
@@ -781,6 +798,20 @@ function render() {
 
   renderLayers(scored);
   renderList(scored);
+
+  if (typeof Telemetry !== "undefined") {
+    Telemetry.pinDropped({
+      lat:         state.pin.lat,
+      lon:         state.pin.lon,
+      mode:        state.mode,
+      cutoffMin:   state.cutoff,
+      weight:      state.w,
+      price:       [...state.prices],
+      view:        state.view,
+      resultCount: scored.length,
+      coverageM:   coverageAtPin(state.pin.lat, state.pin.lon),
+    });
+  }
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -836,6 +867,7 @@ async function loadData() {
 
   places        = placesData.places;
   meanRating    = placesData.meta.mean_rating;
+  coverageRadii = placesData.meta.coverage_radius_m ?? {};
   reviewHistory = histData ?? {};
 
   // Compute corpus-wide Q1 review count once, used by hiddenGems() regardless of cutoff/location

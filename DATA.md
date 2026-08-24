@@ -231,6 +231,26 @@ evaluating future subdivision rounds.
 
 ---
 
+## Telemetry
+
+Pin drops and result clicks are logged without any user, session, or device
+identifier. Coordinates are reduced to a ~200 m grid cell in the browser before
+transmission — the full-precision position never leaves the page. The collector
+(a Cloudflare Worker backed by D1) never reads `CF-Connecting-IP`,
+`X-Forwarded-For`, or any other IP field, and never writes it to the database.
+
+The one exception: the client IP reaches Cloudflare's edge on every HTTPS
+request as a property of the network. It is not retained because Logpush is
+disabled, but that is a **configuration choice**, not a structural guarantee.
+The system is unlinkable by construction for every field the code controls; the
+IP is unlinkable by configuration.
+
+The emitter respects `navigator.globalPrivacyControl` and `navigator.doNotTrack`.
+If either is set, or if the `ENDPOINT` constant in `viz/telemetry.js` is empty
+(the default in the repo), no requests are made at all.
+
+---
+
 ## Summary of obligations
 
 | Obligation | Status |
