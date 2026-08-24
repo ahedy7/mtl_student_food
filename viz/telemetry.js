@@ -29,10 +29,23 @@
   // Bounds accidental loops and casual spam. Not a security control; the
   // Worker validates independently.
   var MAX_EVENTS_PER_LOAD = 200;
-  var MIN_INTERVAL_MS = { pin: 400, click: 150 };
+
+  // Clicks are throttled only enough to swallow a double-click.
+  var MIN_CLICK_INTERVAL_MS = 150;
+
+  // Pin events are debounced on the trailing edge instead of throttled. The
+  // sliders in app.js call render() on every 'input' tick, so a single drag
+  // fires dozens of times. A throttle would keep whichever value happened to
+  // be under the cursor when its window opened, which is a mid-drag sample and
+  // not the value the user chose. Waiting for the drag to stop records the
+  // resting position, once. This is what makes the measured-defaults query
+  // mean anything.
+  var PIN_DEBOUNCE_MS = 700;
 
   var sent = 0;
-  var lastAt = { pin: 0, click: 0 };
+  var lastClickAt = 0;
+  var pinTimer = null;
+  var pinPending = null;
 
   // In memory for the life of the page only. Never persisted, never sent as an
   // identifier; it exists so a click can carry its own context.
@@ -83,13 +96,10 @@
     return Number.isFinite(n) ? n : fallback;
   }
 
-  function post(kind, payload) {
+  function post(payload) {
     if (DISABLED) return;
     try {
-      var now = Date.now();
       if (sent >= MAX_EVENTS_PER_LOAD) return;
-      if (now - lastAt[kind] < MIN_INTERVAL_MS[kind]) return;
-      lastAt[kind] = now;
       sent += 1;
 
       var body = JSON.stringify(payload);
@@ -113,6 +123,39 @@
     } catch (err) {
       /* never surface */
     }
+  }
+
+  function flushPin() {
+    try {
+      if (pinTimer !== null) {
+        global.clearTimeout(pinTimer);
+        pinTimer = null;
+      }
+      if (pinPending) {
+        var payload = pinPending;
+        pinPending = null;
+        post(payload);
+      }
+    } catch (err) {
+      /* never surface */
+    }
+  }
+
+  function schedulePin(payload) {
+    pinPending = payload;
+    if (pinTimer !== null) global.clearTimeout(pinTimer);
+    pinTimer = global.setTimeout(flushPin, PIN_DEBOUNCE_MS);
+  }
+
+  // If the tab is closed or backgrounded mid-drag, send what is queued rather
+  // than losing it. This is exactly the case sendBeacon exists for.
+  try {
+    global.addEventListener("pagehide", flushPin);
+    global.addEventListener("visibilitychange", function () {
+      if (global.document && global.document.visibilityState === "hidden") flushPin();
+    });
+  } catch (err) {
+    /* never surface */
   }
 
   /**
@@ -157,7 +200,7 @@
       var payload = {};
       for (var k in lastQuery) payload[k] = lastQuery[k];
       payload.e = "pin";
-      post("pin", payload);
+      schedulePin(payload);
     } catch (err) {
       /* never surface */
     }
@@ -173,11 +216,17 @@
     try {
       var r = intOr(rank, -1);
       if (r < 0) return;
+      var now = Date.now();
+      if (now - lastClickAt < MIN_CLICK_INTERVAL_MS) return;
+      lastClickAt = now;
+      // A click means the query settled. Send its context now so the pin event
+      // is never ordered after the click that came from it.
+      flushPin();
       var payload = {};
       for (var k in lastQuery) payload[k] = lastQuery[k];
       payload.e = "click";
       payload.rank = r;
-      post("click", payload);
+      post(payload);
     } catch (err) {
       /* never surface */
     }
