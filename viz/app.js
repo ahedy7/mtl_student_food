@@ -453,13 +453,13 @@ function hiddenGems(survivors) {
    ══════════════════════════════════════════════════════════════════════════ */
 
 function scoreToColor(score) {
-  // Gradient: dim blue-gray → teal
+  // Warm ramp: muted sand → saturated coral (#E0523A)
   const t = Math.max(0, Math.min(1, score));
   return [
-    Math.round(60 + t * (0 - 60)),
-    Math.round(80 + t * (212 - 80)),
-    Math.round(120 + t * (170 - 120)),
-    Math.round(180 + t * 75),
+    Math.round(200 + t * (224 - 200)),
+    Math.round(175 + t * (82 - 175)),
+    Math.round(140 + t * (58 - 140)),
+    Math.round(150 + t * 105),
   ];
 }
 
@@ -474,8 +474,8 @@ function renderLayers(scored) {
     id: "isochrone",
     data: hull ? [hull] : [],
     getPolygon: d => d,
-    getFillColor: [0, 185, 160, 28],
-    getLineColor: [0, 185, 160, 75],
+    getFillColor: [224, 82, 58, 22],
+    getLineColor: [224, 82, 58, 65],
     getLineWidth: 1.5,
     lineWidthUnits: "pixels",
     stroked: true,
@@ -490,7 +490,7 @@ function renderLayers(scored) {
     data: viewPlaces,
     getPosition: d => [d.lon, d.lat],
     getRadius: d => state.selected === d.id ? (5 + d.score * 9) * 1.25 : 5 + d.score * 9,
-    getFillColor: d => state.selected === d.id ? [255, 200, 0, 255] : state.view === "gems" ? gemColor() : scoreToColor(d.score),
+    getFillColor: d => state.selected === d.id ? [25, 18, 14, 255] : state.view === "gems" ? gemColor() : scoreToColor(d.score),
     getLineColor: d => state.hover === d.id ? [255, 255, 255, 200] : [255, 255, 255, 40],
     lineWidthMinPixels: 1,
     stroked: true,
@@ -798,6 +798,7 @@ function render() {
 
   renderLayers(scored);
   renderList(scored);
+  updateControlsSummary();
 
   if (typeof Telemetry !== "undefined") {
     Telemetry.pinDropped({
@@ -989,6 +990,71 @@ function renderDataAge(meta = {}) {
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
+   CONTROLS COLLAPSE (desktop only)
+   ══════════════════════════════════════════════════════════════════════════ */
+
+const CAT_CHIP_LABELS = {
+  restaurant:             "Restaurant",
+  cafe:                   "Café",
+  bar:                    "Bar",
+  bakery:                 "Bakery",
+  meal_takeaway:          "Takeout",
+  grocery_or_supermarket: "Grocery",
+};
+
+function buildSummaryText() {
+  const modeText  = state.mode === "walk" ? "Walk" : "Bike";
+  const timeText  = `${state.cutoff} min`;
+  const priceText = state.prices.size === 0
+    ? "all prices"
+    : [...state.prices].sort().map(p => PRICE_LABELS[p]).join(" ");
+  const parts = [modeText, timeText, priceText];
+  if (state.category) parts.push(CAT_CHIP_LABELS[state.category] || state.category);
+  if (state.view === "gems") parts.push("Hidden gems");
+  return parts.join(" · ");
+}
+
+function updateControlsSummary() {
+  const countEl    = document.getElementById("summary-count");
+  const textEl     = document.getElementById("summary-text");
+  if (!countEl || !textEl) return;
+  const count = lastScored.length
+    ? (state.view === "gems"
+        ? hiddenGems(lastScored).length
+        : lastScored.length)
+    : 0;
+  countEl.textContent = count ? `${count} place${count !== 1 ? "s" : ""}` : "";
+  textEl.textContent  = buildSummaryText();
+}
+
+function collapseControls() {
+  if (window.innerWidth <= 700) return;
+  const panel   = document.getElementById("controls-panel");
+  const summary = document.getElementById("controls-summary");
+  if (!panel || !summary) return;
+  panel.classList.add("collapsed");
+  summary.hidden = false;
+  updateControlsSummary();
+}
+
+function expandControls() {
+  const panel   = document.getElementById("controls-panel");
+  const summary = document.getElementById("controls-summary");
+  if (!panel || !summary) return;
+  panel.classList.remove("collapsed");
+  summary.hidden = true;
+}
+
+function initControlsCollapse() {
+  const summary = document.getElementById("controls-summary");
+  if (!summary) return;
+  summary.addEventListener("click", expandControls);
+  summary.addEventListener("keydown", e => {
+    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); expandControls(); }
+  });
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
    MAP CLICK / PIN DROP
    ══════════════════════════════════════════════════════════════════════════ */
 
@@ -1010,6 +1076,9 @@ function handleMapClick({ coordinate }) {
       const list = document.getElementById("results-list");
       if (list) list.scrollIntoView({ behavior: "smooth" });
     }, 100);
+  } else {
+    // Desktop: collapse controls to show results
+    collapseControls();
   }
 
   render();
@@ -1307,21 +1376,49 @@ function initSidebarResizer() {
   });
 }
 
+/* ── Brand logo ──────────────────────────────────────────────────────────── */
+function initFoodMark() {
+  const el = document.getElementById("brand-mark");
+  if (!el) return;
+  const img    = document.createElement("img");
+  img.src      = "assets/logo.svg";
+  img.alt      = "Mtl food";
+  img.title    = "Montreal food finder";
+  img.width    = 28;
+  img.height   = 35;
+  el.appendChild(img);
+}
+
 /* ── Boot ────────────────────────────────────────────────────────────────── */
 window.addEventListener("DOMContentLoaded", async () => {
   _testHours();
   parseStateFromURL();
+  initFoodMark();
   initMap();
   initControls();
+  initControlsCollapse();
   initResultsResizer();
   initSidebarResizer();
   syncUIFromState();
+
+  // If restoring state with a pin, collapse controls immediately (no animation)
+  if (state.pin && window.innerWidth > 700) {
+    const panel = document.getElementById("controls-panel");
+    if (panel) { panel.style.transition = "none"; panel.classList.add("collapsed"); }
+    const summary = document.getElementById("controls-summary");
+    if (summary) summary.hidden = false;
+    updateControlsSummary();
+    requestAnimationFrame(() => {
+      if (panel) panel.style.transition = "";
+    });
+  }
 
   try {
     await loadData();
     if (state.pin) {
       flyTo(state.pin.lon, state.pin.lat);
       render();
+      updateControlsSummary();
     }
   } catch (err) {
     console.error("Data load failed:", err);

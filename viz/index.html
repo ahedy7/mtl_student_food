@@ -4,6 +4,10 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Mtl Food</title>
+  <link rel="icon" type="image/svg+xml" href="assets/logo-favicon.svg" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500&display=swap" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@3/dist/maplibre-gl.css" />
   <link rel="stylesheet" href="style.css" />
 </head>
@@ -12,7 +16,7 @@
     <!-- ── Left sidebar ───────────────────────────────── -->
     <aside id="sidebar">
       <header id="brand">
-        <span class="brand-mark">▲</span>
+        <span class="brand-mark" id="brand-mark" aria-hidden="true"></span>
         <span class="brand-name">mtl<strong>food</strong></span>
       </header>
 
@@ -21,6 +25,13 @@
         <div id="pin-status-mobile" class="status-pill status-idle">Drop a pin</div>
         <button id="btn-filters-toggle">Filters ▾</button>
       </div>
+
+      <!-- Controls summary — shown after pin drop on desktop, collapses the panel -->
+      <button id="controls-summary" hidden aria-label="Edit search settings">
+        <span id="summary-count" class="summary-count"></span>
+        <span id="summary-text" class="summary-text"></span>
+        <span class="summary-edit">Edit ⌄</span>
+      </button>
 
       <!-- Controls panel (vertically resizable) -->
       <div id="controls-panel">
@@ -104,8 +115,8 @@
       </div>
 
       <footer id="sidebar-footer">
-        <button id="btn-locate">⊕ Use my location</button>
-        <button id="btn-copy-link" title="Copy link to this view">⎘ Copy link</button>
+        <button id="btn-locate" aria-label="Use my location" title="Use my location">⊕</button>
+        <button id="btn-copy-link" aria-label="Copy link to this view" title="Copy link">⎘</button>
         <select id="basemap-select" title="Change basemap">
           <option value="ofm-liberty" selected>OFM Liberty</option>
           <option value="dark-matter">Dark Matter</option>
@@ -117,7 +128,7 @@
           <option value="stadia-toner">Stadia Toner (B&W)</option>
           <option value="stadia-toner-lite">Stadia Toner Lite</option>
         </select>
-        <button id="btn-help" title="How it works">?</button>
+        <button id="btn-help" aria-label="How it works" title="How it works">?</button>
       </footer>
 
       <!-- Attribution for Google Places content.
@@ -165,7 +176,7 @@
             </div>
             <div>
               <strong>What do the dots mean?</strong><br/>
-              <span class="welcome-muted">Size and brightness = how well a place matches your settings. Bigger and brighter teal = higher score. Smaller and dimmer = lower score.</span>
+              <span class="welcome-muted">Size and brightness = how well a place matches your settings. Bigger and brighter coral = higher score. Smaller and dimmer = lower score.</span>
             </div>
           </div>
         </div>
