@@ -686,7 +686,7 @@ function renderList(scored) {
         </div>
         ${state.view === "best" && !isGem
           ? `<div class="result-score-bar"><div class="result-score-fill" style="width:${pct}%"></div></div>
-             <div class="score-breakdown">★ ${rPct}%&ensp;·&ensp;📍 ${cPct}%</div>`
+             <div class="score-breakdown">★ ${rPct}% rating&ensp;·&ensp;${cPct}% closeness</div>`
           : ""}
         ${attribution}
       </div>

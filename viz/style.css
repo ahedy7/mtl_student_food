@@ -1,7 +1,7 @@
 /* ── Design tokens ────────────────────────────────────────────────────────── */
 :root {
   --bg:            #FBF7F1;
-  --surface:       #FFFFFF;
+  --surface:       #FFFDFA;
   --surface-sunk:  #F3ECE3;
   --text:          #1F1B18;
   --text-muted:    #6B635C;
@@ -767,12 +767,11 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
 #welcome-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(31,27,24,0.5);
+  background: rgba(31,27,24,0.45);
   z-index: 1000;
   display: flex;
   align-items: center;
   justify-content: center;
-  backdrop-filter: blur(4px);
 }
 #welcome-overlay.hidden { display: none; }
 
@@ -782,7 +781,7 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
   padding: 32px;
   max-width: 460px;
   width: calc(100% - 40px);
-  box-shadow: 0 24px 80px rgba(31,27,24,0.2);
+  box-shadow: 0 8px 24px rgba(31,27,24,0.12);
 }
 #welcome-modal h2 {
   font-size: 22px;
@@ -945,24 +944,13 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
 
   #btn-filters-toggle {
     flex-shrink: 0;
-    background: var(--surface-sunk);
+    background: var(--accent-soft);
     border: 2px solid var(--accent);
     border-radius: 12px;
-    color: var(--text);
+    color: var(--accent-deep);
     font-size: 12px;
     padding: 5px 10px;
     cursor: pointer;
-    animation: pulse-red 1.2s ease-in-out infinite;
-  }
-  #btn-filters-toggle.open,
-  #btn-filters-toggle.attention-done {
-    border-color: var(--accent);
-    color: var(--accent-deep);
-    animation: none;
-  }
-  @keyframes pulse-red {
-    0%, 100% { box-shadow: 0 0 0 0 rgba(224,82,58,0.5); }
-    50%       { box-shadow: 0 0 0 5px rgba(224,82,58,0); }
   }
 
   /* controls hidden by default on mobile; .open shows them */
