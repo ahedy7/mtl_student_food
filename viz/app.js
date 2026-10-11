@@ -741,9 +741,7 @@ function render() {
   setStatus("routing", "Routing…");
 
   // Snap pin to nearest node; measure off-graph leg in seconds
-  const t_nn = performance.now();
   const startNode  = nearestNodeGrid(gridLists[state.mode], graph.nodeFlat, state.pin.lat, state.pin.lon);
-  console.log(`nearest-node: ${(performance.now()-t_nn).toFixed(2)} ms`);
 
   // No node within reach: the pin is off the network entirely. Say so, rather
   // than routing from an arbitrary node and inventing travel times.
@@ -848,10 +846,13 @@ async function loadData() {
     return r.json();
   });
 
-  const [placesData, walkData, bikeData, histData] = await Promise.all([
+  // Bike graph (~660KB of .bin) is not fetched here — state.mode defaults to
+  // "walk", so most visits never need it on the critical path. It is fetched
+  // lazily by ensureBikeGraph(), either on first toggle to Bike or during idle
+  // time shortly after load; see scheduleBikePrefetch().
+  const [placesData, walkData, histData] = await Promise.all([
     fetchJson("data/places.json"),
     loadGraphBinary("walk"),
-    loadGraphBinary("bike"),
     fetch("data/review_history.json").then(r => r.ok ? r.json() : {}),
   ]);
 
@@ -865,23 +866,49 @@ async function loadData() {
   corpusReviewQ1 = sorted[Math.floor(sorted.length * 0.25)];
 
   graphs.walk   = walkData;
-  graphs.bike   = bikeData;
   adjLists.walk = buildCSR(walkData.edgeFlat, walkData.timesFlat, walkData.meta.node_count);
-  adjLists.bike = buildCSR(bikeData.edgeFlat, bikeData.timesFlat, bikeData.meta.node_count);
   gridLists.walk = buildNodeGrid(walkData.nodeFlat);
-  gridLists.bike = buildNodeGrid(bikeData.nodeFlat);
 
   console.log(
     `[mtl-food] loaded: ${places.length} places | ` +
-    `walk ${walkData.meta.node_count} nodes / ${walkData.meta.edge_count} edges | ` +
-    `bike ${bikeData.meta.node_count} nodes / ${bikeData.meta.edge_count} edges`
+    `walk ${walkData.meta.node_count} nodes / ${walkData.meta.edge_count} edges`
   );
 
-  assertNodeIdsValid(walkData, bikeData);
+  assertNodeIdsValid(walkData, null);
   renderDataAge(placesData.meta);
   renderMetaAttributions(placesData.meta);
 
   setStatus("idle", "Click the map to drop a pin");
+}
+
+let bikeLoadPromise = null;
+
+/* Fetches, parses, and indexes the bike graph on demand. Safe to call more
+   than once — concurrent callers share the one in-flight fetch, and a failed
+   attempt clears the promise so the next call retries instead of hanging. */
+function ensureBikeGraph() {
+  if (graphs.bike) return Promise.resolve();
+  if (!bikeLoadPromise) {
+    bikeLoadPromise = loadGraphBinary("bike").then(bikeData => {
+      graphs.bike    = bikeData;
+      adjLists.bike  = buildCSR(bikeData.edgeFlat, bikeData.timesFlat, bikeData.meta.node_count);
+      gridLists.bike = buildNodeGrid(bikeData.nodeFlat);
+      assertNodeIdsValid(graphs.walk, bikeData);
+      console.log(`[mtl-food] bike: ${bikeData.meta.node_count} nodes / ${bikeData.meta.edge_count} edges (lazy)`);
+    }).catch(err => {
+      bikeLoadPromise = null;
+      throw err;
+    });
+  }
+  return bikeLoadPromise;
+}
+
+/* Fetches the bike graph in idle time after first paint, so a manual toggle to
+   Bike mode usually finds it already warm instead of showing a spinner. */
+function scheduleBikePrefetch() {
+  const prefetch = () => ensureBikeGraph().catch(() => {});
+  if ("requestIdleCallback" in window) requestIdleCallback(prefetch, { timeout: 4000 });
+  else setTimeout(prefetch, 1500);
 }
 
 /* Startup sanity check on the place → graph-node ids.
@@ -895,12 +922,14 @@ async function loadData() {
    also measures snap distances; here we can only check ranges cheaply, so a bad
    median still needs the prep script. */
 function assertNodeIdsValid(walkData, bikeData) {
-  const counts = { walk: walkData.meta.node_count, bike: bikeData.meta.node_count };
+  const counts = { walk: walkData.meta.node_count };
+  if (bikeData) counts.bike = bikeData.meta.node_count;
   const bad = { walk: 0, bike: 0 };
   let offNetwork = 0;
+  const modes = bikeData ? ["walk", "bike"] : ["walk"];
 
   for (const p of places) {
-    for (const mode of ["walk", "bike"]) {
+    for (const mode of modes) {
       const id = p[`${mode}_node`];
       if (id === null || id === undefined) { offNetwork++; continue; }
       if (!Number.isInteger(id) || id < 0 || id >= counts[mode]) bad[mode]++;
@@ -1150,10 +1179,21 @@ function initControls() {
 
   // Mode toggle
   document.querySelectorAll(".toggle-btn").forEach(btn => {
-    btn.addEventListener("click", () => {
-      state.mode = btn.dataset.mode;
+    btn.addEventListener("click", async () => {
+      const mode = btn.dataset.mode;
       document.querySelectorAll(".toggle-btn").forEach(b => b.classList.remove("active"));
       btn.classList.add("active");
+      state.mode = mode;
+      if (mode === "bike" && !graphs.bike) {
+        setStatus("routing", `<span class="spinner-inline"></span>Loading bike network…`);
+        try {
+          await ensureBikeGraph();
+        } catch (err) {
+          console.error("[mtl-food] bike network failed to load:", err);
+          setStatus("error", "Could not load the bike network — try again");
+          return;
+        }
+      }
       render();
     });
   });
@@ -1367,15 +1407,13 @@ function initSidebarResizer() {
 
 /* ── Brand logo ──────────────────────────────────────────────────────────── */
 function initFoodMark() {
-  const el = document.getElementById("brand-mark");
-  if (!el) return;
-  const img    = document.createElement("img");
-  img.src      = "assets/logo.svg";
-  img.alt      = "Mtl food";
-  img.title    = "Montreal food finder";
-  img.width    = 28;
-  img.height   = 35;
-  el.appendChild(img);
+  document.querySelectorAll(".brand-mark").forEach(el => {
+    const img    = document.createElement("img");
+    img.src      = "assets/logo.svg";
+    img.alt      = "Mtl food";
+    img.title    = "Montreal food finder";
+    el.appendChild(img);
+  });
 }
 
 /* ── Boot ────────────────────────────────────────────────────────────────── */
@@ -1404,6 +1442,11 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   try {
     await loadData();
+    // A shared link can restore state.mode to "bike" before any toggle click
+    // ever fires — load it inline here rather than leaving render() stuck
+    // waiting on a graph nothing triggered.
+    if (state.mode === "bike") await ensureBikeGraph();
+    else scheduleBikePrefetch();
     if (state.pin) {
       flyTo(state.pin.lon, state.pin.lat);
       render();

@@ -126,7 +126,7 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
   padding: 16px 20px 14px;
   border-bottom: 1px solid var(--border);
 }
-#brand-mark {
+.brand-mark {
   width: 28px;
   height: 35px;
   flex-shrink: 0;
@@ -135,7 +135,7 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
   align-items: center;
   justify-content: center;
 }
-#brand-mark img {
+.brand-mark img {
   width: 28px;
   height: 35px;
 }
@@ -933,6 +933,15 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
     padding: 6px 12px;
     flex-shrink: 0;
     border-bottom: 1px solid var(--border);
+  }
+
+  #brand-mark-mobile {
+    width: 20px;
+    height: 25px;
+  }
+  #brand-mark-mobile img {
+    width: 20px;
+    height: 25px;
   }
 
   #pin-status-mobile {

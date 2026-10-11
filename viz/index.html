@@ -3,8 +3,20 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Mtl Food</title>
+  <title>Mtl Food — find food you can actually reach in Montreal</title>
+  <meta name="description" content="Drop a pin, pick walk or bike and a time budget — ranks Montreal restaurants and cafés by what's really reachable over the street network, not straight-line distance." />
+  <meta name="theme-color" content="#FBF7F1" />
+
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="Mtl Food" />
+  <meta property="og:description" content="Find food you can actually reach in Montreal — routed over the real walking and cycling street network, not straight-line distance." />
+  <meta property="og:url" content="https://ahedy7.github.io/mtl_student_food/" />
+  <meta name="twitter:card" content="summary" />
+  <meta name="twitter:title" content="Mtl Food" />
+  <meta name="twitter:description" content="Find food you can actually reach in Montreal — routed over the real walking and cycling street network, not straight-line distance." />
+
   <link rel="icon" type="image/svg+xml" href="assets/logo-favicon.svg" />
+  <link rel="apple-touch-icon" href="assets/logo-touch.png" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500&display=swap" />
@@ -22,6 +34,7 @@
 
       <!-- Mobile top bar (hidden on desktop) -->
       <div id="mobile-bar">
+        <span class="brand-mark" id="brand-mark-mobile" aria-hidden="true"></span>
         <div id="pin-status-mobile" class="status-pill status-idle">Drop a pin</div>
         <button id="btn-filters-toggle">Filters ▾</button>
       </div>
