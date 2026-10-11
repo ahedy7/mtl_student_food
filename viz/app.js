@@ -875,7 +875,10 @@ async function loadData() {
   );
 
   assertNodeIdsValid(walkData, null);
-  renderDataAge(placesData.meta);
+  // renderDataAge(placesData.meta) intentionally not called: the badge would
+  // greet every visitor with "stale, due a refresh" until the next paid pull.
+  // Travel times are unaffected by corpus age — only review counts/hours can
+  // drift. Re-enable after a fresh pull.
   renderMetaAttributions(placesData.meta);
 
   setStatus("idle", "Click the map to drop a pin");
