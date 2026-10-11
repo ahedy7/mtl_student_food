@@ -140,6 +140,7 @@ let reviewHistory = {};   // place_id → [{date, count}, ...]
 let lastScored    = [];
 let lastDistArr   = null;
 let lastGraph     = null;
+let lastAdj       = null;
 let coverageRadii = {};   // "lat,lon" → radius_m for round-2 pull centres
 
 /* ── deck.gl + MapLibre ──────────────────────────────────────────────────── */
@@ -304,40 +305,29 @@ function dijkstra(csr, nodeCount, start, cutoffSec) {
   return dist;
 }
 
-/* Andrew's monotone chain — returns convex hull of [[x,y],...] in CCW order. */
-function convexHull(pts) {
-  if (pts.length < 3) return pts;
-  const s = [...pts].sort((a, b) => a[0] !== b[0] ? a[0] - b[0] : a[1] - b[1]);
-  const cross = (o, a, b) => (a[0]-o[0])*(b[1]-o[1]) - (a[1]-o[1])*(b[0]-o[0]);
-  const lower = [];
-  for (const p of s) {
-    while (lower.length >= 2 && cross(lower[lower.length-2], lower[lower.length-1], p) <= 0) lower.pop();
-    lower.push(p);
-  }
-  const upper = [];
-  for (let i = s.length - 1; i >= 0; i--) {
-    const p = s[i];
-    while (upper.length >= 2 && cross(upper[upper.length-2], upper[upper.length-1], p) <= 0) upper.pop();
-    upper.push(p);
-  }
-  lower.pop();
-  upper.pop();
-  return lower.concat(upper);
-}
-
-/* Returns [lon,lat] convex hull of all reachable graph nodes, or null. */
-function isochronePolygon() {
-  if (!lastGraph || !lastDistArr) return null;
+/* Returns [[ [lon,lat],[lon,lat] ], ...] — every street-network edge with both
+   endpoints inside the cutoff. Drawn in place of a filled isochrone shape so the
+   overlay can never claim reach across water, parkland, or rail corridors that
+   the network itself doesn't cross; see KNOWN_ISSUES.md #1. buildCSR() inserts
+   both directions for every edge, so skipping v <= u drops exact duplicates
+   only, never a real segment. */
+function isochroneEdges() {
+  if (!lastGraph || !lastDistArr || !lastAdj) return [];
   const nodes = lastGraph.nodeFlat;
-  const n = nodes.length >> 1;
+  const dist  = lastDistArr;
+  const csr   = lastAdj;
   const cutoffSec = state.cutoff * 60;
-  const pts = [];
-  for (let i = 0; i < n; i++) {
-    if (lastDistArr[i] <= cutoffSec) {
-      pts.push([nodes[i*2+1], nodes[i*2]]); // [lon, lat] for deck.gl
+  const segments = [];
+  for (let u = 0; u < dist.length; u++) {
+    if (dist[u] > cutoffSec) continue;
+    const end = csr.offsets[u + 1];
+    for (let i = csr.offsets[u]; i < end; i++) {
+      const v = csr.nbrs[i];
+      if (v <= u || dist[v] > cutoffSec) continue;
+      segments.push([[nodes[u*2+1], nodes[u*2]], [nodes[v*2+1], nodes[v*2]]]);
     }
   }
-  return pts.length >= 3 ? convexHull(pts) : null;
+  return segments;
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -466,20 +456,16 @@ function scoreToColor(score) {
 function gemColor() { return [255, 209, 102, 230]; }
 
 function renderLayers(scored) {
-  const { ScatterplotLayer, PolygonLayer } = deck;
+  const { ScatterplotLayer, PathLayer } = deck;
 
-  // Isochrone: convex hull of reachable nodes, drawn under restaurant dots
-  const hull = isochronePolygon();
-  const isoLayer = new PolygonLayer({
+  // Isochrone: actual reachable street-network edges, drawn under restaurant dots
+  const isoLayer = new PathLayer({
     id: "isochrone",
-    data: hull ? [hull] : [],
-    getPolygon: d => d,
-    getFillColor: [224, 82, 58, 22],
-    getLineColor: [224, 82, 58, 65],
-    getLineWidth: 1.5,
-    lineWidthUnits: "pixels",
-    stroked: true,
-    filled: true,
+    data: isochroneEdges(),
+    getPath: d => d,
+    getColor: [224, 82, 58, 90],
+    getWidth: 1.5,
+    widthUnits: "pixels",
     pickable: false,
   });
 
@@ -741,6 +727,7 @@ function render() {
   if (!state.pin) {
     lastDistArr = null;
     lastGraph   = null;
+    lastAdj     = null;
     renderLayers([]);
     renderList([]);
     setStatus("idle", "Click the map to drop a pin");
@@ -763,6 +750,7 @@ function render() {
   if (startNode < 0) {
     lastDistArr = null;
     lastGraph   = null;
+    lastAdj     = null;
     renderLayers([]);
     // Walk-mode failure: check whether bike reaches this spot. If it does, the
     // island has cycle paths but no walk connection to the mainland — say so.
@@ -790,6 +778,7 @@ function render() {
   const distArr = dijkstra(adjLists[state.mode], graph.nodeFlat.length >> 1, startNode, cutoffSec);
   lastDistArr   = distArr;
   lastGraph     = graph;
+  lastAdj       = adj;
   const scored  = filterAndScore(distArr, cutoffSec, pinSnapSec);
   lastScored    = scored;
 
